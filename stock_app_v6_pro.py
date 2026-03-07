@@ -79,24 +79,36 @@ def evaluate_stock_100(df):
 def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
+    
+    # 指標計算
     ma20 = df_slice['Close'].rolling(20).mean()
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
+    
+    # 布林通道與中軸
     ax1.plot(df_slice.index, up, color='blue', alpha=0.2, lw=0.8, label='布林上軌')
     ax1.plot(df_slice.index, ma20, color='orange', alpha=0.5, lw=1, ls='--', label='布林中軸')
     ax1.plot(df_slice.index, dn, color='blue', alpha=0.2, lw=0.8, label='布林下軌')
     ax1.fill_between(df_slice.index, up, dn, color='blue', alpha=0.03)
+    
+    # 收盤價
     ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=2, label='收盤價')
+    
+    # 長線指標
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
     ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(len(df_slice))
     ax1.plot(df_slice.index, ma120, label='半年線', color='red', ls='--', lw=1.2)
     ax1.plot(df_slice.index, ma1200, label='五年線', color='green', ls='-.', lw=1.2)
+    
     ax1.set_ylim(df_slice['Low'].min()*0.97, df_slice['High'].max()*1.03)
-    ax1.set_title(title, fontsize=14, fontweight='bold')
+    ax1.set_title(title, fontsize=14, fontweight='bold', pad=10)
     ax1.legend(loc='best', fontsize=8); ax1.grid(True, alpha=0.2)
+    
+    # 成交量
     df_res = df_slice.resample(resample_rule).agg({'Open':'first', 'Close':'last', 'Volume':'sum'})
     colors = ['#ff4b4b' if df_res['Close'].iloc[i] >= df_res['Open'].iloc[i] else '#008000' for i in range(len(df_res))]
     ax2.bar(df_res.index, df_res['Volume'], color=colors, width=(2.5 if resample_rule=='3D' else 5), alpha=0.7)
+    
     plt.tight_layout()
     return fig
 
@@ -105,11 +117,23 @@ st.set_page_config(page_title="2026 AI 台股決策", layout="wide")
 
 st.sidebar.markdown("""
     <style>
-    .potential-item { padding: 8px; border-radius: 5px; margin-bottom: 5px; background-color: #f0f2f6; border-left: 5px solid #ff4b4b; font-size: 0.9em; }
-    .potential-score { color: #ff4b4b; font-weight: bold; }
+    .potential-item { 
+        padding: 8px; 
+        border-radius: 5px; 
+        margin-bottom: 5px; 
+        background-color: #f0f2f6; 
+        border-left: 5px solid #ff4b4b; 
+        font-size: 0.95em; 
+        color: #000000; /* 強制文字為黑色提升清晰度 */
+    }
+    .potential-score { 
+        color: #ff4b4b; 
+        font-weight: bold; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
+# 置頂查詢框
 st.sidebar.title("⌨️ 查詢系統")
 query_in = st.sidebar.text_input("輸入股票代號或公司中文", "3675")
 
@@ -119,7 +143,11 @@ st.sidebar.subheader("🚩 潛力參考名單")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "3231.TW", "1513.TW", "1519.TW", "2603.TW", "2881.TW"]
+    # 擴大掃描範圍以確保 10 檔名單
+    test_list = [
+        "2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", 
+        "2382.TW", "6669.TW", "3231.TW", "1513.TW", "1519.TW", "2603.TW", "2881.TW"
+    ]
     for t in test_list:
         d = fetch_stock_data(t, period="7y") 
         s, _ = evaluate_stock_100(d)
@@ -155,23 +183,32 @@ if ticker:
         twii = fetch_stock_data("^TWII", period="7y")
         t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
         t_pct = ((t_lp - t_pp)/t_pp)*100
-        
+        t_color = "red" if t_pct > 0 else "green"
+
+        # 基本資訊
         st.markdown(f"#### 📋 {ticker} - {c_name}")
         st.caption(f"🕒 最後收盤日：{last_date}")
         
         col1, col2 = st.columns([1, 1])
         with col1:
             st.metric("現價", f"{lp:,.2f}", f"{pct:+.2f}%")
-            st.caption(f"🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)")
+            st.markdown(f"<span style='font-size: 0.9em;'>🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)</span>", unsafe_allow_html=True)
         with col2:
-            st.metric("AI 評分", f"{score} 分")
-            with st.expander("🔍 評分明細"):
+            # 評分動態顏色邏輯
+            score_color = "#ff4b4b" if score >= 50 else "#008000"
+            st.markdown(f"### 💡 AI 評分: <span style='color:{score_color}'>{score} 分</span>", unsafe_allow_html=True)
+            with st.expander("🔍 符合評分項目"):
                 for t in tags: st.write(f"✅ {t}")
 
+        # 趨勢圖表
         st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】波段指標圖", 130, '3D'))
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
         
-        # 修正重點：手機版象限圖優化
+        st.markdown("---")
+        # 恢復五年波段指標圖
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
+
+        # 象限圖
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
@@ -186,21 +223,16 @@ if ticker:
         
         if q_list:
             q_df = pd.DataFrame(q_list)
-            # 調整 figsize 與字體大小以適應手機
             fig_q, ax_q = plt.subplots(figsize=(10, 6))
             colors = ['#ff4b4b' if r == ticker else 'royalblue' for r in q_df['T']]
             ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=200, edgecolors='white', zorder=5)
-            
             for i, txt in enumerate(q_df['N']):
-                # 手機版標籤字體稍微縮小，避免重疊
                 ax_q.annotate(txt, (q_df['S'][i], q_df['C'][i]), fontsize=9, xytext=(4,4), textcoords='offset points', fontweight='bold')
-            
             ax_q.axvline(50, color='gray', ls='--', alpha=0.3)
-            ax_q.axhline(0, color='gray', ls='--', alpha=0.3)
-            ax_q.set_xlabel("評分 (分)", fontsize=10)
-            ax_q.set_ylabel("漲跌幅 (%)", fontsize=10)
-            ax_q.tick_params(labelsize=8)
+            ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
+            ax_q.set_xlabel("AI 評分 (分)", fontsize=10)
+            ax_q.set_ylabel("今日漲跌幅 (%)", fontsize=10)
             st.pyplot(fig_q)
 
 st.markdown("---")
-st.markdown("<p style='color:red; font-size: 0.75em; text-align: center; font-weight: bold;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
+st.markdown("<p style='color:red; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
