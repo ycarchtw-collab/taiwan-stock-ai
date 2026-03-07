@@ -14,8 +14,8 @@ else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# 核心監控清單
-CORE_LIST = {
+# 核心監控名單 (手動建立，確保 100% 顯示)
+CORE_MAP = {
     "2330.TW": "台積電", "2454.TW": "聯發科", "2317.TW": "鴻海", "3675.TWO": "德微",
     "6282.TW": "康舒", "2303.TW": "聯電", "3037.TW": "欣興", "2382.TW": "廣達",
     "6669.TW": "緯穎", "3231.TW": "緯創", "2376.TW": "技嘉", "1513.TW": "中興電",
@@ -32,16 +32,21 @@ def fetch_stock_data(ticker, period="7y"):
         return pd.DataFrame()
 
 @st.cache_data(ttl=86400)
-def get_company_name(ticker):
-    if ticker in CORE_LIST:
-        return CORE_LIST[ticker]
+def get_company_name(ticker, ticker_obj):
+    """強化版名稱抓取邏輯"""
+    # 1. 優先比對內建名單
+    if ticker in CORE_MAP:
+        return CORE_MAP[ticker]
+    
+    # 2. 嘗試從 ticker 物件中獲取 (減少 API 調用)
     try:
-        t_obj = yf.Ticker(ticker)
-        name = t_obj.info.get('shortName') or t_obj.info.get('longName')
+        name = ticker_obj.info.get('shortName') or ticker_obj.info.get('longName')
         if name: return name
-        return ticker.split('.')[0]
     except:
-        return ticker.split('.')[0]
+        pass
+    
+    # 3. 若失敗，回傳純數字代號
+    return ticker.split('.')[0]
 
 def calculate_rsi(df, periods=14):
     delta = df['Close'].diff()
@@ -99,7 +104,7 @@ st.sidebar.title("🔍 75分潛力標的")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    for t, n in CORE_LIST.items():
+    for t, n in CORE_MAP.items():
         d = fetch_stock_data(t, period="1y")
         s, _ = evaluate_stock_100(d)
         if s >= 75: p_list.append((n, t.split('.')[0], s))
@@ -108,24 +113,31 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.success(f"🔥 {name} ({code}) : {sc}分")
 
-st.title("🚀 2026 AI 台股決策系統 V6 Pro")
+st.title("🚀 2026 AI 台股決測 V6 Pro")
 query_in = st.sidebar.text_input("輸入代號或名稱", "3675")
 
+# 智慧轉換代號
 ticker = query_in
-name_to_ticker = {v: k for k, v in CORE_LIST.items()}
-if query_in in name_to_ticker:
-    ticker = name_to_ticker[query_in]
+reverse_core = {v: k for k, v in CORE_MAP.items()}
+if query_in in reverse_core:
+    ticker = reverse_core[query_in]
 elif query_in.isdigit():
     ticker = query_in + ".TW"
 
 if ticker:
-    hist = fetch_stock_data(ticker, period="7y")
+    t_obj = yf.Ticker(ticker)
+    hist = t_obj.history(period="7y")
+    
+    # 處理上櫃股切換
     if hist.empty and ".TW" in ticker:
         ticker = ticker.replace(".TW", ".TWO")
-        hist = fetch_stock_data(ticker, period="7y")
+        t_obj = yf.Ticker(ticker)
+        hist = t_obj.history(period="7y")
         
     if not hist.empty:
-        c_name = get_company_name(ticker)
+        # 正確獲取中文名稱
+        c_name = get_company_name(ticker, t_obj)
+        
         hist['MA120'], hist['MA1200'] = hist['Close'].rolling(120).mean(), hist['Close'].rolling(1200).mean()
         score, tags = evaluate_stock_100(hist)
         last_date = hist.index[-1].strftime('%Y-%m-%d')
@@ -151,11 +163,12 @@ if ticker:
             if ticker not in compare: compare.append(ticker)
             q_list = []
             for t_item in compare:
-                d_q = fetch_stock_data(t_item, period="5y")
+                c_obj = yf.Ticker(t_item)
+                d_q = c_obj.history(period="5y")
                 if d_q.empty: continue
                 s_q, _ = evaluate_stock_100(d_q)
                 c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
-                q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
+                q_list.append({"T": t_item, "N": get_company_name(t_item, c_obj), "S": s_q, "C": c_q})
             
             if q_list:
                 q_df = pd.DataFrame(q_list)
