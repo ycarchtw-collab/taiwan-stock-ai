@@ -14,7 +14,7 @@ else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# 核心監控名單 (手動建立，確保 100% 顯示)
+# 核心監控名單
 CORE_MAP = {
     "2330.TW": "台積電", "2454.TW": "聯發科", "2317.TW": "鴻海", "3675.TWO": "德微",
     "6282.TW": "康舒", "2303.TW": "聯電", "3037.TW": "欣興", "2382.TW": "廣達",
@@ -31,21 +31,19 @@ def fetch_stock_data(ticker, period="7y"):
     except:
         return pd.DataFrame()
 
+# 修正處：移除 t_obj 參數，僅傳入字串 ticker
 @st.cache_data(ttl=86400)
-def get_company_name(ticker, ticker_obj):
-    """強化版名稱抓取邏輯"""
-    # 1. 優先比對內建名單
+def get_company_name(ticker):
+    """強化版名稱抓取邏輯：僅接收字串參數避免 Cache 錯誤"""
     if ticker in CORE_MAP:
         return CORE_MAP[ticker]
-    
-    # 2. 嘗試從 ticker 物件中獲取 (減少 API 調用)
     try:
-        name = ticker_obj.info.get('shortName') or ticker_obj.info.get('longName')
+        # 在函數內部建立臨時物件查詢
+        t_info = yf.Ticker(ticker).info
+        name = t_info.get('shortName') or t_info.get('longName')
         if name: return name
     except:
         pass
-    
-    # 3. 若失敗，回傳純數字代號
     return ticker.split('.')[0]
 
 def calculate_rsi(df, periods=14):
@@ -89,8 +87,8 @@ def plot_v6_pro(df, title, days, resample_rule):
     std20 = df_slice['Close'].rolling(20).std()
     ax1.fill_between(df_slice.index, ma20+std20*2, ma20-std20*2, color='blue', alpha=0.07, label='布林通道')
     ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=1.8, label='收盤價')
-    if 'MA120' in df_slice: ax1.plot(df_slice.index, df_slice['MA120'], label='半年線', color='red', ls='--')
-    if 'MA1200' in df_slice: ax1.plot(df_slice.index, df_slice['MA1200'], label='五年線', color='green', ls='-.')
+    if 'MA120' in df_slice: ax1.plot(df_slice.index, df_slice['MA120'], color='red', ls='--', label='半年線')
+    if 'MA1200' in df_slice: ax1.plot(df_slice.index, df_slice['MA1200'], color='green', ls='-.', label='五年線')
     ax1.set_ylim(df_slice['Low'].min()*0.98, df_slice['High'].max()*1.02)
     ax1.set_title(title); ax1.legend(loc='lower left'); ax1.grid(True, alpha=0.3)
     
@@ -125,18 +123,13 @@ elif query_in.isdigit():
     ticker = query_in + ".TW"
 
 if ticker:
-    t_obj = yf.Ticker(ticker)
-    hist = t_obj.history(period="7y")
-    
-    # 處理上櫃股切換
+    hist = fetch_stock_data(ticker, period="7y")
     if hist.empty and ".TW" in ticker:
         ticker = ticker.replace(".TW", ".TWO")
-        t_obj = yf.Ticker(ticker)
-        hist = t_obj.history(period="7y")
+        hist = fetch_stock_data(ticker, period="7y")
         
     if not hist.empty:
-        # 正確獲取中文名稱
-        c_name = get_company_name(ticker, t_obj)
+        c_name = get_company_name(ticker)
         
         hist['MA120'], hist['MA1200'] = hist['Close'].rolling(120).mean(), hist['Close'].rolling(1200).mean()
         score, tags = evaluate_stock_100(hist)
@@ -163,12 +156,11 @@ if ticker:
             if ticker not in compare: compare.append(ticker)
             q_list = []
             for t_item in compare:
-                c_obj = yf.Ticker(t_item)
-                d_q = c_obj.history(period="5y")
+                d_q = fetch_stock_data(t_item, period="5y")
                 if d_q.empty: continue
                 s_q, _ = evaluate_stock_100(d_q)
                 c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
-                q_list.append({"T": t_item, "N": get_company_name(t_item, c_obj), "S": s_q, "C": c_q})
+                q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
             
             if q_list:
                 q_df = pd.DataFrame(q_list)
