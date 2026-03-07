@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import json
 import os
 import time
+import base64
 
 # --- 1. 雲端環境與字體設定 ---
 if os.name == 'posix':
@@ -31,7 +32,7 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 ---
+# --- 3. 核心運算與指標 ---
 @st.cache_data(ttl=3600)
 def fetch_stock_data(ticker, period="7y"):
     try:
@@ -78,45 +79,70 @@ def evaluate_stock_100(df):
 
 def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
+    plt.style.use('dark_background')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
+    
     ma20 = df_slice['Close'].rolling(20).mean()
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
-    ax1.plot(df_slice.index, up, color='blue', alpha=0.2, lw=0.8, label='布林上軌')
-    ax1.plot(df_slice.index, ma20, color='orange', alpha=0.5, lw=1, ls='--', label='布林中軸')
-    ax1.plot(df_slice.index, dn, color='blue', alpha=0.2, lw=0.8, label='布林下軌')
-    ax1.fill_between(df_slice.index, up, dn, color='blue', alpha=0.03)
-    ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=2, label='收盤價')
+    
+    ax1.plot(df_slice.index, up, color='#66CCFF', alpha=0.3, lw=0.8, label='布林上軌')
+    ax1.plot(df_slice.index, ma20, color='orange', alpha=0.6, lw=1, ls='--', label='布林中軸')
+    ax1.plot(df_slice.index, dn, color='#66CCFF', alpha=0.3, lw=0.8, label='布林下軌')
+    ax1.fill_between(df_slice.index, up, dn, color='#66CCFF', alpha=0.05)
+    
+    ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=2.2, label='收盤價')
+    
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
     ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(len(df_slice))
-    ax1.plot(df_slice.index, ma120, label='半年線', color='red', ls='--', lw=1.2)
-    ax1.plot(df_slice.index, ma1200, label='五年線', color='green', ls='-.', lw=1.2)
+    ax1.plot(df_slice.index, ma120, label='半年線', color='#FF6666', ls='--', lw=1.2)
+    ax1.plot(df_slice.index, ma1200, label='五年線', color='#66FF66', ls='-.', lw=1.2)
+    
     ax1.set_ylim(df_slice['Low'].min()*0.97, df_slice['High'].max()*1.03)
-    ax1.set_title(title, fontsize=14, fontweight='bold')
-    ax1.legend(loc='best', fontsize=8); ax1.grid(True, alpha=0.2)
+    ax1.set_title(title, fontsize=14, fontweight='bold', color='white')
+    ax1.legend(loc='best', fontsize=8, facecolor='#222'); ax1.grid(True, alpha=0.15)
+    
     df_res = df_slice.resample(resample_rule).agg({'Open':'first', 'Close':'last', 'Volume':'sum'})
-    colors = ['#ff4b4b' if df_res['Close'].iloc[i] >= df_res['Open'].iloc[i] else '#008000' for i in range(len(df_res))]
-    ax2.bar(df_res.index, df_res['Volume'], color=colors, width=(2.5 if resample_rule=='3D' else 5), alpha=0.7)
+    colors = ['#FF4B4B' if df_res['Close'].iloc[i] >= df_res['Open'].iloc[i] else '#00E676' for i in range(len(df_res))]
+    ax2.bar(df_res.index, df_res['Volume'], color=colors, width=(2.5 if resample_rule=='3D' else 5), alpha=0.8)
+    
+    fig.patch.set_alpha(0.0) 
     plt.tight_layout()
     return fig
 
 # --- 4. 網頁 UI 佈局 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-st.markdown("""
+# 背景圖 CSS 處理
+if os.path.exists('孔明看盤.png'):
+    with open('孔明看盤.png', "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode()
+    bg_style = f"""
     <style>
-    h1 { font-size: clamp(1.4rem, 5vw, 2.5rem) !important; color: #1E1E1E; }
-    .potential-item { 
-        padding: 8px; border-radius: 5px; margin-bottom: 5px; background-color: #f0f2f6; 
-        border-left: 5px solid #ff4b4b; font-size: 0.95em; color: #000000; font-weight: 500;
-    }
-    .potential-score { color: #ff4b4b; font-weight: bold; }
-    .market-index { 
-        font-size: 0.9em; color: #FFFFFF; font-weight: bold; background: #333; 
-        padding: 6px 12px; border-radius: 6px; display: inline-block; margin-top: 8px;
-    }
+    [data-testid="stAppViewContainer"] {{
+        background-image: url("data:image/png;base64,{encoded_string}");
+        background-size: cover; background-position: center; background-attachment: fixed;
+    }}
+    [data-testid="stAppViewContainer"]::before {{
+        content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); z-index: -1;
+    }}
+    [data-testid="stSidebar"] {{ background-color: rgba(30, 30, 30, 0.9) !important; }}
+    h1 {{ font-size: clamp(1.4rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; }}
+    .potential-item {{ 
+        padding: 8px; border-radius: 5px; margin-bottom: 5px; background-color: rgba(255, 255, 255, 0.08); 
+        border-left: 5px solid #ff4b4b; font-size: 0.95em; color: #FFFFFF !important;
+    }}
+    .market-index {{ 
+        font-size: 0.9em; color: #FFFFFF !important; font-weight: bold; background: rgba(0,0,0,0.6); 
+        padding: 6px 12px; border-radius: 6px; display: inline-block; margin-top: 8px; border: 1px solid #444;
+    }}
     </style>
-""", unsafe_allow_html=True)
+    """
+else:
+    bg_style = "<style>[data-testid='stAppViewContainer'] { background-color: #121212; }</style>"
+
+st.markdown(bg_style, unsafe_allow_html=True)
 
 st.sidebar.title("⌨️ 查詢系統")
 query_in = st.sidebar.text_input("輸入股票代號或公司中文", "3675")
@@ -159,12 +185,12 @@ if ticker:
         lp, pp = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
         pct = ((lp - pp)/pp)*100
         
-        pct_color = "red" if pct >= 0 else "green"
+        pct_color = "#FF4B4B" if pct >= 0 else "#00E676"
         
         twii = fetch_stock_data("^TWII", period="7y")
         t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
         t_pct = ((t_lp - t_pp)/t_pp)*100
-        t_pct_color = "#ff4b4b" if t_pct >= 0 else "#00ff00"
+        t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00E676"
         
         st.markdown(f"#### 📋 {ticker} - {c_name}")
         st.caption(f"🕒 最後收盤日：{last_date}")
@@ -172,11 +198,11 @@ if ticker:
         col1, col2 = st.columns([1, 1])
         with col1:
             st.write("現價")
-            st.markdown(f"<span style='font-size: 2.2rem; font-weight: bold;'>{lp:,.2f}</span> <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span>", unsafe_allow_html=True)
+            st.markdown(f"<span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span>", unsafe_allow_html=True)
             st.markdown(f"<div class='market-index'>🔴 大盤指數: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>", unsafe_allow_html=True)
 
         with col2:
-            score_color = "#ff4b4b" if score >= 50 else "#008000"
+            score_color = "#FF4B4B" if score >= 50 else "#00E676"
             st.markdown(f"### 💡 AI 評分: <span style='color:{score_color}'>{score} 分</span>", unsafe_allow_html=True)
             with st.expander("🔍 符合項目"):
                 for t in tags: st.write(f"✅ {t}")
@@ -190,14 +216,7 @@ if ticker:
 
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
-        
-        st.info("""
-        📊 **落點解析說明：**
-        * **右上 (強勢攻擊區)：** AI 評分高且漲勢強。標的處於多頭攻擊態勢。
-        * **右下 (蓄勢待發區)：** AI 評分高但今日走勢受壓。具備補漲潛力。
-        * **左上 (過熱投機區)：** 今日漲幅高但 AI 評分低。留意短線回檔風險。
-        * **左下 (弱勢觀望區)：** 評分與漲跌皆疲弱。建議持續觀察標的基本面。
-        """)
+        st.info("📊 **落點解析說明：** 右上為強勢攻擊區，右下為蓄勢待發區，左上為短線過熱區，左下為弱勢觀望區。")
 
         compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
         if ticker not in compare: compare.append(ticker)
@@ -211,17 +230,19 @@ if ticker:
         
         if q_list:
             q_df = pd.DataFrame(q_list)
+            plt.style.use('dark_background')
             fig_q, ax_q = plt.subplots(figsize=(10, 6))
-            colors = ['#ff4b4b' if r == ticker else 'royalblue' for r in q_df['T']]
+            colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
             ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=220, edgecolors='white', zorder=5)
             for i, txt in enumerate(q_df['N']):
-                ax_q.annotate(txt, (q_df['S'][i], q_df['C'][i]), fontsize=9, xytext=(4,4), textcoords='offset points', fontweight='bold')
+                ax_q.annotate(txt, (q_df['S'][i], q_df['C'][i]), fontsize=9, xytext=(4,4), textcoords='offset points', fontweight='bold', color='white')
             ax_q.axvline(50, color='gray', ls='--', alpha=0.3)
-            ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
-            ax_q.set_xlabel("AI 評分 (分)", fontsize=10)
-            ax_q.set_ylabel("漲跌幅 (%)", fontsize=10)
+            ax_q.axhline(0, color='gray', ls='--', alpha=0.3)
+            ax_q.set_xlabel("AI 評分 (分)", color='white')
+            ax_q.set_ylabel("漲跌幅 (%)", color='white')
+            fig_q.patch.set_alpha(0.0)
             
             st.pyplot(fig_q)
 
 st.markdown("---")
-st.markdown("<p style='color:red; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
+st.markdown("<p style='color:#FF6666; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
