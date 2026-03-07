@@ -101,7 +101,7 @@ def plot_v6_pro(df, title, days, resample_rule):
     return fig
 
 # --- 4. 網頁 UI 佈局 ---
-st.set_page_config(page_title="2026 AI 台股決策", layout="wide")
+st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
 st.markdown("""
     <style>
@@ -134,7 +134,7 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div class="potential-item"><b>{name}</b> ({code})<br>AI 評分: <span class="potential-score">{sc} 分</span></div>', unsafe_allow_html=True)
 
-st.title("🚀 AI 台股決策系統 V6 Pro")
+st.title("🚀 台股｜AI 諸葛孔明 🪭")
 
 ticker = query_in
 name_to_ticker = {v: k for k, v in STOCK_DB.items()}
@@ -161,7 +161,7 @@ if ticker:
         twii = fetch_stock_data("^TWII", period="7y")
         t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
         t_pct = ((t_lp - t_pp)/t_pp)*100
-        t_pct_color = "#ff4b4b" if t_pct >= 0 else "#00ff00" # 大盤白色背景下綠色改亮一點
+        t_pct_color = "#ff4b4b" if t_pct >= 0 else "#00ff00"
         
         st.markdown(f"#### 📋 {ticker} - {c_name}")
         st.caption(f"🕒 最後收盤日：{last_date}")
@@ -186,7 +186,6 @@ if ticker:
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         
-        # 使用 st.info 確保說明內容在任何設備都能正常顯示
         st.info("""
         📊 **落點解析說明：**
         * **右上 (強勢攻擊區)：** AI 評分高且漲勢強。標的處於多頭攻擊態勢。
