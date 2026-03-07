@@ -127,7 +127,6 @@ st.sidebar.subheader("🚩 潛力參考名單")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    # 擴大掃描範圍確保 10 檔名單
     test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "3231.TW", "1513.TW", "1519.TW", "2603.TW", "2881.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="7y") 
@@ -171,9 +170,9 @@ if ticker:
         col1, col2 = st.columns([1, 1])
         with col1:
             st.metric("現價", f"{lp:,.2f}", f"{pct:+.2f}%")
-            st.markdown(f"<span style='font-size: 0.9em; color:#333;'>🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)</span>", unsafe_allow_html=True)
+            # 需求：大盤指數顏色改為白色
+            st.markdown(f"<span style='font-size: 0.9em; color:#FFFFFF;'>🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)</span>", unsafe_allow_html=True)
         with col2:
-            # 分數動態變色：50以上紅，以下綠
             score_color = "#ff4b4b" if score >= 50 else "#008000"
             st.markdown(f"### 💡 AI 評分: <span style='color:{score_color}'>{score} 分</span>", unsafe_allow_html=True)
             with st.expander("🔍 符合評分項目"):
@@ -187,7 +186,6 @@ if ticker:
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         
-        # 使用 st.container 與更強健的 HTML 確保說明文字正常顯示
         with st.container():
             st.markdown(f"""
             <div style="background-color: #f8f9fa; padding: 16px; border-radius: 8px; border: 1px solid #ced4da; margin-bottom: 20px;">
