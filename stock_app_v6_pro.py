@@ -14,14 +14,13 @@ else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# 核心監控清單 (增加更多常用代號，確保 100% 顯示中文)
+# 核心監控清單
 CORE_LIST = {
     "2330.TW": "台積電", "2454.TW": "聯發科", "2317.TW": "鴻海", "3675.TWO": "德微",
     "6282.TW": "康舒", "2303.TW": "聯電", "3037.TW": "欣興", "2382.TW": "廣達",
     "6669.TW": "緯穎", "3231.TW": "緯創", "2376.TW": "技嘉", "1513.TW": "中興電",
     "1519.TW": "華城", "4763.TW": "材料-KY", "8086.TWO": "宏捷科", "6438.TW": "迅得",
-    "0050.TW": "元大台灣50", "00981A.TW": "統一台股增長", "2395.TW": "研華", "3034.TW": "聯詠",
-    "2409.TW": "友達", "3481.TW": "群創", "2603.TW": "長榮", "2609.TW": "陽明"
+    "0050.TW": "元大台灣50", "00981A.TW": "統一台股增長", "2395.TW": "研華", "3034.TW": "聯詠"
 }
 
 @st.cache_data(ttl=3600)
@@ -34,18 +33,12 @@ def fetch_stock_data(ticker, period="7y"):
 
 @st.cache_data(ttl=86400)
 def get_company_name(ticker):
-    """強化版名稱抓取：優先從內建名單找"""
-    # 1. 先從內建字典找
     if ticker in CORE_LIST:
         return CORE_LIST[ticker]
-    
-    # 2. 名單外才嘗試查詢 Yahoo
     try:
         t_obj = yf.Ticker(ticker)
-        # 優先取 shortName (比 longName 容易抓到)
         name = t_obj.info.get('shortName') or t_obj.info.get('longName')
         if name: return name
-        # 3. 如果連 info 都失敗，回傳代碼本身
         return ticker.split('.')[0]
     except:
         return ticker.split('.')[0]
@@ -118,7 +111,6 @@ for name, code, sc in scan_potential():
 st.title("🚀 2026 AI 台股決策系統 V6 Pro")
 query_in = st.sidebar.text_input("輸入代號或名稱", "3675")
 
-# 智慧轉換邏輯
 ticker = query_in
 name_to_ticker = {v: k for k, v in CORE_LIST.items()}
 if query_in in name_to_ticker:
@@ -134,7 +126,6 @@ if ticker:
         
     if not hist.empty:
         c_name = get_company_name(ticker)
-        
         hist['MA120'], hist['MA1200'] = hist['Close'].rolling(120).mean(), hist['Close'].rolling(1200).mean()
         score, tags = evaluate_stock_100(hist)
         last_date = hist.index[-1].strftime('%Y-%m-%d')
@@ -148,5 +139,31 @@ if ticker:
         col1, col2 = st.columns([2, 1])
         with col1:
             st.markdown(f"## 現價: **{lp:,.2f}** <span style='color:{p_color}'>({pct:+.2f}%)</span>", unsafe_allow_html=True)
-            [Image of a stock market chart with 5-year moving average, daily percentage change, and weekly volume bars]
-            st.pyplot
+            st.pyplot(plot_v6_pro(hist, "半年趨勢 (三日量能)", 130, '3D'))
+            st.pyplot(plot_v6_pro(hist, "五年長線 (每週量能)", 1250, 'W'))
+        
+        with col2:
+            st.subheader(f"💡 AI 評分 (滿分100): {score}")
+            for t in tags: st.success(t)
+            
+            st.subheader("📍 潛力象限分析")
+            compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
+            if ticker not in compare: compare.append(ticker)
+            q_list = []
+            for t_item in compare:
+                d_q = fetch_stock_data(t_item, period="5y")
+                if d_q.empty: continue
+                s_q, _ = evaluate_stock_100(d_q)
+                c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
+                q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
+            
+            if q_list:
+                q_df = pd.DataFrame(q_list)
+                fig_q, ax_q = plt.subplots(figsize=(5, 5))
+                colors = ['red' if r == ticker else 'royalblue' for r in q_df['T']]
+                ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=150, edgecolors='white', zorder=5)
+                for i, txt in enumerate(q_df['N']):
+                    ax_q.annotate(txt, (q_df['S'][i], q_df['C'][i]), fontsize=8, xytext=(5,5), textcoords='offset points')
+                ax_q.axvline(50, color='gray', ls='--', alpha=0.5); ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
+                ax_q.set_xlim(0, 105); ax_q.set_xlabel("評分 (滿分100)"); ax_q.set_ylabel("漲跌幅 %")
+                st.pyplot(fig_q)
