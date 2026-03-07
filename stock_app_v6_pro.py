@@ -105,23 +105,16 @@ st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
 st.markdown("""
     <style>
-    /* 自適應大標題 */
     h1 { font-size: clamp(1.4rem, 5vw, 2.5rem) !important; color: #1E1E1E; }
-    
     .potential-item { 
         padding: 8px; border-radius: 5px; margin-bottom: 5px; background-color: #f0f2f6; 
         border-left: 5px solid #ff4b4b; font-size: 0.95em; color: #000000; font-weight: 500;
     }
     .potential-score { color: #ff4b4b; font-weight: bold; }
-    
-    /* 大盤背景塊 */
     .market-index { 
         font-size: 0.9em; color: #FFFFFF; font-weight: bold; background: #333; 
         padding: 6px 12px; border-radius: 6px; display: inline-block; margin-top: 8px;
     }
-    
-    /* 解析說明框 */
-    .stInfo { font-size: 0.9em !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -144,7 +137,6 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div class="potential-item"><b>{name}</b> ({code})<br>AI 評分: <span class="potential-score">{sc} 分</span></div>', unsafe_allow_html=True)
 
-# 修正：使用 HTML 實體編碼確保羽扇圖示在各平台顯示正常
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明 &#129681;</h1>", unsafe_allow_html=True)
 
 ticker = query_in
@@ -190,10 +182,10 @@ if ticker:
                 for t in tags: st.write(f"✅ {t}")
 
         st.markdown("---")
-        [Image of a candlestick chart showing stock price trends with Bollinger Bands and volume]
+        
         st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
         st.markdown("---")
-        [Image of a long-term stock market price chart spanning 5 years with moving average lines]
+        
         st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
 
         st.markdown("---")
@@ -228,8 +220,8 @@ if ticker:
             ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
             ax_q.set_xlabel("AI 評分 (分)", fontsize=10)
             ax_q.set_ylabel("漲跌幅 (%)", fontsize=10)
-            [Image of a financial quadrant chart plotting stock potential vs price changes]
+            
             st.pyplot(fig_q)
 
 st.markdown("---")
-st.markdown("<p style='color:red; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p
+st.markdown("<p style='color:red; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
