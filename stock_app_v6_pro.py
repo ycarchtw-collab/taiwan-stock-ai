@@ -103,23 +103,23 @@ def plot_v6_pro(df, title, days, resample_rule):
 # --- 4. 網頁 UI 佈局 ---
 st.set_page_config(page_title="2026 AI 台股決策", layout="wide")
 
-# CSS 優化：解決手機標題擠壓與文字顯示問題
 st.markdown("""
     <style>
-    /* 響應式標題字體 */
     h1 { font-size: clamp(1.5rem, 5vw, 2.5rem) !important; }
-    h3 { font-size: clamp(1.1rem, 3vw, 1.8rem) !important; }
-    h4 { font-size: clamp(1rem, 2.5vw, 1.5rem) !important; }
-    
-    /* 側欄名單樣式強化 */
     .potential-item { 
         padding: 8px; border-radius: 5px; margin-bottom: 5px; background-color: #f0f2f6; 
         border-left: 5px solid #ff4b4b; font-size: 0.95em; color: #000000; font-weight: 500;
     }
     .potential-score { color: #ff4b4b; font-weight: bold; }
-    
-    /* 大盤指數顯示 */
     .market-index { font-size: 0.9em; color: #FFFFFF; font-weight: bold; }
+    
+    /* 落點解析說明手機優化：文字不擠壓，寬度自適應 */
+    .analysis-box {
+        background-color: #f8f9fa; padding: 12px; border-radius: 8px; 
+        border: 1px solid #ced4da; margin-bottom: 20px;
+        font-size: clamp(0.85rem, 2.5vw, 1rem);
+        line-height: 1.5;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -132,7 +132,7 @@ st.sidebar.subheader("🚩 潛力參考名單")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "1513.TW", "1519.TW", "2603.TW", "2881.TW"]
+    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "1513.TW", "1519.TW", "2881.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="7y") 
         s, _ = evaluate_stock_100(d)
@@ -163,28 +163,45 @@ if ticker:
         last_date = hist.index[-1].strftime('%Y-%m-%d')
         lp, pp = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
         pct = ((lp - pp)/pp)*100
-        p_color = "red" if pct > 0 else ("green" if pct < 0 else "black")
+        
+        # 需求：現價漲跌色彩邏輯
+        pct_color = "#ff4b4b" if pct >= 0 else "#008000"
         
         twii = fetch_stock_data("^TWII", period="7y")
         t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
         t_pct = ((t_lp - t_pp)/t_pp)*100
+        # 需求：大盤漲跌色彩邏輯
+        t_pct_color = "#ff4b4b" if t_pct >= 0 else "#008000"
         
         st.markdown(f"#### 📋 {ticker} - {c_name}")
         st.caption(f"🕒 最後收盤日：{last_date}")
         
         col1, col2 = st.columns([1, 1])
         with col1:
-            st.metric("現價", f"{lp:,.2f}", f"{pct:+.2f}%")
-            # 需求：大盤指數顏色改為白色
-            st.markdown(f"<div class='market-index'>🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)</div>", unsafe_allow_html=True)
+            # 修改現價與％數顏色
+            st.markdown(f"""
+                <div style='margin-bottom: 10px;'>
+                    <span style='font-size: 0.9em; color: gray;'>現價</span><br>
+                    <span style='font-size: 1.8rem; font-weight: bold;'>{lp:,.2f}</span>
+                    <span style='color:{pct_color}; font-weight: bold;'>({pct:+.2f}%)</span>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # 修改大盤指數％數顏色，字體維持白色
+            st.markdown(f"""
+                <div class='market-index'>
+                    🔴 大盤指數: {t_lp:,.2f} 
+                    <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span>
+                </div>
+            """, unsafe_allow_html=True)
+
         with col2:
             score_color = "#ff4b4b" if score >= 50 else "#008000"
             st.markdown(f"### 💡 AI 評分: <span style='color:{score_color}'>{score} 分</span>", unsafe_allow_html=True)
-            with st.expander("🔍 符合評分項目"):
+            with st.expander("🔍 符合項目"):
                 for t in tags: st.write(f"✅ {t}")
 
         st.markdown("---")
-        
         st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
         st.markdown("---")
         st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
@@ -194,12 +211,12 @@ if ticker:
         
         with st.container():
             st.markdown(f"""
-            <div style="background-color: #f8f9fa; padding: 16px; border-radius: 8px; border: 1px solid #ced4da; margin-bottom: 20px;">
-                <h5 style="margin: 0 0 10px 0; color: #333;">📊 落點解析說明：</h5>
-                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>右上 (強勢攻擊區)：</b>AI 評分高且漲勢強。適合順勢參與。</p>
-                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>右下 (蓄勢待發區)：</b>評分高但今日受壓。具補漲潛力。</p>
-                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>左上 (過熱投機區)：</b>評分低但今日漲幅高。需留意回檔風險。</p>
-                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>左下 (弱勢觀望區)：</b>評分與漲跌皆疲弱。建議持續觀察。</p>
+            <div class="analysis-box">
+                <b style="color: #333;">📊 落點解析說明：</b><br>
+                • <b>右上 (強勢攻擊區)：</b>AI 評分高且漲勢強。適合順勢參與。<br>
+                • <b>右下 (蓄勢待發區)：</b>評分高但今日受壓。具補漲潛力。<br>
+                • <b>左上 (過熱投機區)：</b>評分低但今日漲幅高。需留意回檔風險。<br>
+                • <b>左下 (弱勢觀望區)：</b>評分與漲跌皆疲弱。建議持續觀察。
             </div>
             """, unsafe_allow_html=True)
 
@@ -223,7 +240,7 @@ if ticker:
             ax_q.axvline(50, color='gray', ls='--', alpha=0.3)
             ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
             ax_q.set_xlabel("AI 評分 (分)", fontsize=10)
-            ax_q.set_ylabel("今日漲跌幅 (%)", fontsize=10)
+            ax_q.set_ylabel("漲跌幅 (%)", fontsize=10)
             st.pyplot(fig_q)
 
 st.markdown("---")
