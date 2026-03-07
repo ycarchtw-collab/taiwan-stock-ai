@@ -31,7 +31,7 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 ---
+# --- 3. 核心運算與指標計算 ---
 @st.cache_data(ttl=3600)
 def fetch_stock_data(ticker, period="7y"):
     try:
@@ -52,8 +52,11 @@ def evaluate_stock_100(df):
     score, reasons = 0, []
     try:
         c = df['Close'].iloc[-1]
-        m20, m120, m1200 = df['Close'].rolling(20).mean(), df['Close'].rolling(120).mean(), df['Close'].rolling(1200, min_periods=100).mean()
-        std20, rsi = df['Close'].rolling(20).std(), calculate_rsi(df).iloc[-1]
+        m20 = df['Close'].rolling(20).mean()
+        m120 = df['Close'].rolling(120).mean()
+        m1200 = df['Close'].rolling(1200, min_periods=100).mean()
+        std20 = df['Close'].rolling(20).std()
+        rsi = calculate_rsi(df).iloc[-1]
         vol, avg_vol = df['Volume'].iloc[-1], df['Volume'].tail(5).mean()
         
         tests = [
@@ -74,18 +77,37 @@ def evaluate_stock_100(df):
 def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
-    ma20, std20 = df_slice['Close'].rolling(20).mean(), df_slice['Close'].rolling(20).std()
-    ax1.fill_between(df_slice.index, ma20+std20*2, ma20-std20*2, color='blue', alpha=0.07, label='布林通道')
-    ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=1.8, label='收盤價')
-    if 'MA120' in df_slice: ax1.plot(df_slice.index, df_slice['MA120'], label='半年線', color='red', ls='--')
-    if 'MA1200' in df_slice: ax1.plot(df_slice.index, df_slice['MA1200'], label='五年線', color='green', ls='-.')
-    ax1.set_ylim(df_slice['Low'].min()*0.98, df_slice['High'].max()*1.02)
-    ax1.set_title(title, fontsize=14, fontweight='bold', pad=15)
-    ax1.legend(loc='lower left'); ax1.grid(True, alpha=0.3)
     
+    # 計算指標線
+    ma20 = df_slice['Close'].rolling(20).mean()
+    std20 = df_slice['Close'].rolling(20).std()
+    up, dn = ma20 + std20*2, ma20 - std20*2
+    
+    # 價格與指標走勢線
+    ax1.plot(df_slice.index, up, color='blue', alpha=0.3, lw=1, label='布林上軌')
+    ax1.plot(df_slice.index, dn, color='blue', alpha=0.3, lw=1, label='布林下軌')
+    ax1.fill_between(df_slice.index, up, dn, color='blue', alpha=0.05)
+    
+    ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=2, label='收盤價')
+    
+    # 加入均線走勢
+    ma120 = df['Close'].rolling(120).mean().tail(days)
+    ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(days)
+    
+    ax1.plot(df_slice.index, ma120, label='半年線 (MA120)', color='red', ls='--', lw=1.5)
+    ax1.plot(df_slice.index, ma1200, label='五年線 (MA1200)', color='green', ls='-.', lw=1.5)
+    
+    ax1.set_ylim(df_slice['Low'].min()*0.97, df_slice['High'].max()*1.03)
+    ax1.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    ax1.legend(loc='best', fontsize=8); ax1.grid(True, alpha=0.2)
+    
+    # 成交量柱狀圖
     df_res = df_slice.resample(resample_rule).agg({'Open':'first', 'Close':'last', 'Volume':'sum'})
-    colors = ['red' if df_res['Close'].iloc[i] >= df_res['Open'].iloc[i] else 'green' for i in range(len(df_res))]
-    ax2.bar(df_res.index, df_res['Volume'], color=colors, width=(2.5 if resample_rule=='3D' else 5), alpha=0.8)
+    colors = ['#ff4b4b' if df_res['Close'].iloc[i] >= df_res['Open'].iloc[i] else '#008000' for i in range(len(df_res))]
+    ax2.bar(df_res.index, df_res['Volume'], color=colors, width=(2.5 if resample_rule=='3D' else 5), alpha=0.7)
+    ax2.set_ylabel("成交量")
+    
+    plt.tight_layout()
     return fig
 
 # --- 4. 網頁 UI 佈局 ---
@@ -96,17 +118,16 @@ st.sidebar.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 需求 1：輸入框移至側欄最上方
+# 需求 1：置頂輸入框
 st.sidebar.title("⌨️ 查詢系統")
 query_in = st.sidebar.text_input("輸入股票代號或公司中文", "3675")
 
-# 側欄名單 (紅灰配色)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🚩 潛力參考名單")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "1513.TW", "1519.TW"]
+    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="1y")
         s, _ = evaluate_stock_100(d)
@@ -116,10 +137,9 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div class="potential-item"><b>{name}</b> ({code})<br>AI 評分: <span class="potential-score">{sc} 分</span></div>', unsafe_allow_html=True)
 
-# 主畫面佈局
+# 主畫面
 st.title("🚀 2026 AI 台股決策系統 V6 Pro")
 
-# 智慧轉換
 ticker = query_in
 name_to_ticker = {v: k for k, v in STOCK_DB.items()}
 if query_in in name_to_ticker:
@@ -141,27 +161,27 @@ if ticker:
         pct = ((lp - pp)/pp)*100
         p_color = "red" if pct > 0 else ("green" if pct < 0 else "black")
         
-        # 基本資訊與評分
         st.markdown(f"### 📋 查詢標的：{ticker} - {c_name} | 🕒 最後收盤日：{last_date}")
         
         info_col, score_col = st.columns([1.5, 1])
         with info_col:
             st.markdown(f"## 現價: **{lp:,.2f}** <span style='color:{p_color}'>({pct:+.2f}%)</span>", unsafe_allow_html=True)
         with score_col:
-            # 需求 4：分數後面加上單位「分」
+            # 需求 4：分數後加單位「分」
             st.markdown(f"### 💡 AI 評分: <span style='color:#ff4b4b'>{score} 分</span>", unsafe_allow_html=True)
-            for t in tags[:3]: st.caption(f"✅ {t}")
 
-        # 需求 3：趨勢圖加入圖名抬頭
+        # 需求 3：圖表抬頭
         st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段趨勢圖 (三日量能)", 130, '3D'))
+        
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖 (含布林通道/半年線)", 130, '3D'))
         
         st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年長線循環圖 (每週量能)", 1250, 'W'))
+        
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年長線循環圖 (含五年均線)", 1250, 'W'))
 
-        # 需求 2：象限圖移至下方並放大
+        # 需求 2：象限圖放大並移至底部
         st.markdown("---")
-        st.subheader("📍 潛力象限分析 (個股位階對比)")
+        st.subheader("📍 潛力象限分析 (市場位階對比)")
         compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
         if ticker not in compare: compare.append(ticker)
         
@@ -175,9 +195,8 @@ if ticker:
         
         if q_list:
             q_df = pd.DataFrame(q_list)
-            # 放大象限圖比例 (寬度設為 12)
             fig_q, ax_q = plt.subplots(figsize=(12, 6))
-            colors = ['red' if r == ticker else 'royalblue' for r in q_df['T']]
+            colors = ['#ff4b4b' if r == ticker else 'royalblue' for r in q_df['T']]
             ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5, alpha=0.8)
             
             for i, txt in enumerate(q_df['N']):
@@ -186,5 +205,6 @@ if ticker:
             ax_q.axvline(50, color='gray', ls='--', alpha=0.5)
             ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
             ax_q.set_xlim(0, 105); ax_q.set_xlabel("AI 評分 (分)"); ax_q.set_ylabel("今日漲跌幅 (%)")
-            ax_q.set_title("市場位階分佈：右上為強勢攻擊區 / 左下為弱勢觀望區", fontsize=12, pad=10)
+            ax_q.set_title("右上：強勢進攻區 / 左下：弱勢修正區", fontsize=12, pad=10)
+            
             st.pyplot(fig_q)
