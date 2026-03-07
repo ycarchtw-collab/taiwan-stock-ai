@@ -17,28 +17,24 @@ plt.rcParams['axes.unicode_minus'] = False
 # --- 2. 強化版名稱加載邏輯 ---
 @st.cache_data
 def load_stock_names():
-    # 預設核心清單 (保底用)
-    names = {
-        "2330.TW": "台積電", "2317.TW": "鴻海", "3675.TWO": "德微", 
-        "6282.TW": "康舒", "2454.TW": "聯發科", "0050.TW": "元大台灣50"
-    }
-    # 嘗試從本地 JSON 檔案讀取完整清單
+    # 預設核心清單 (保底)
+    names = {"2330.TW": "台積電", "2317.TW": "鴻海", "3675.TWO": "德微", "0050.TW": "元大台灣50"}
     try:
+        # 讀取與腳本同路徑的 JSON
         if os.path.exists('tw_stock_names.json'):
             with open('tw_stock_names.json', 'r', encoding='utf-8') as f:
-                external_names = json.load(f)
-                names.update(external_names)
-    except Exception as e:
-        st.error(f"無法加載名稱資料庫: {e}")
+                names.update(json.load(f))
+    except:
+        pass
     return names
 
 STOCK_DB = load_stock_names()
 
 def get_company_name(ticker):
-    """從資料庫獲取名稱，完全不調用 API 以確保速度"""
+    """從 JSON 資料庫獲取名稱，絕不調用 yfinance info 以免報錯"""
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心功能函數 ---
+# --- 3. 核心運算 ---
 @st.cache_data(ttl=3600)
 def fetch_stock_data(ticker, period="7y"):
     try:
@@ -59,11 +55,8 @@ def evaluate_stock_100(df):
     score, reasons = 0, []
     try:
         c = df['Close'].iloc[-1]
-        m20 = df['Close'].rolling(20).mean()
-        m120 = df['Close'].rolling(120).mean()
-        m1200 = df['Close'].rolling(1200, min_periods=100).mean()
-        std20 = df['Close'].rolling(20).std()
-        rsi = calculate_rsi(df).iloc[-1]
+        m20, m120, m1200 = df['Close'].rolling(20).mean(), df['Close'].rolling(120).mean(), df['Close'].rolling(1200, min_periods=100).mean()
+        std20, rsi = df['Close'].rolling(20).std(), calculate_rsi(df).iloc[-1]
         vol, avg_vol = df['Volume'].iloc[-1], df['Volume'].tail(5).mean()
         
         tests = [
@@ -84,8 +77,7 @@ def evaluate_stock_100(df):
 def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
-    ma20 = df_slice['Close'].rolling(20).mean()
-    std20 = df_slice['Close'].rolling(20).std()
+    ma20, std20 = df_slice['Close'].rolling(20).mean(), df_slice['Close'].rolling(20).std()
     ax1.fill_between(df_slice.index, ma20+std20*2, ma20-std20*2, color='blue', alpha=0.07, label='布林通道')
     ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=1.8, label='收盤價')
     if 'MA120' in df_slice: ax1.plot(df_slice.index, df_slice['MA120'], label='半年線', color='red', ls='--')
@@ -111,8 +103,8 @@ st.sidebar.title("🚩 潛力參考名單")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    # 僅對資料庫中的核心個股進行掃描以節省效能
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "3231.TW", "2376.TW", "1513.TW", "1519.TW"]
+    # 掃描前 15 檔核心個股
+    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "3231.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="1y")
         s, _ = evaluate_stock_100(d)
@@ -125,7 +117,7 @@ for name, code, sc in scan_potential():
 st.title("🚀 2026 AI 台股決測系統 V6 Pro")
 query_in = st.sidebar.text_input("輸入代號或名稱", "3675")
 
-# 智慧轉換與查詢
+# 智慧轉換
 ticker = query_in
 name_to_ticker = {v: k for k, v in STOCK_DB.items()}
 if query_in in name_to_ticker:
@@ -147,7 +139,7 @@ if ticker:
         pct = ((lp - pp)/pp)*100
         p_color = "red" if pct > 0 else ("green" if pct < 0 else "black")
         
-        st.markdown(f"### 📋 查詢標的：{ticker} - {c_name}")
+        st.markdown(f"### 📋 查詢標特：{ticker} - {c_name}")
         st.markdown(f"🕒 **最後收盤日**：{last_date}")
         
         col1, col2 = st.columns([2, 1])
