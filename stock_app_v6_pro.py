@@ -111,13 +111,8 @@ st.set_page_config(page_title="2026 AI 台股決策", layout="wide")
 st.sidebar.markdown("""
     <style>
     .potential-item { 
-        padding: 8px; 
-        border-radius: 5px; 
-        margin-bottom: 5px; 
-        background-color: #f0f2f6; 
-        border-left: 5px solid #ff4b4b; 
-        font-size: 0.95em; 
-        color: #000000; /* 強制文字純黑 */
+        padding: 8px; border-radius: 5px; margin-bottom: 5px; background-color: #f0f2f6; 
+        border-left: 5px solid #ff4b4b; font-size: 0.95em; color: #000000; font-weight: 500;
     }
     .potential-score { color: #ff4b4b; font-weight: bold; }
     </style>
@@ -132,7 +127,8 @@ st.sidebar.subheader("🚩 潛力參考名單")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "3231.TW", "1513.TW", "1519.TW"]
+    # 擴大掃描範圍確保 10 檔名單
+    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "2382.TW", "6669.TW", "3231.TW", "1513.TW", "1519.TW", "2603.TW", "2881.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="7y") 
         s, _ = evaluate_stock_100(d)
@@ -175,8 +171,9 @@ if ticker:
         col1, col2 = st.columns([1, 1])
         with col1:
             st.metric("現價", f"{lp:,.2f}", f"{pct:+.2f}%")
-            st.markdown(f"<span style='font-size: 0.9em;'>🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)</span>", unsafe_allow_html=True)
+            st.markdown(f"<span style='font-size: 0.9em; color:#333;'>🔴 大盤指數: {t_lp:,.2f} ({t_pct:+.2f}%)</span>", unsafe_allow_html=True)
         with col2:
+            # 分數動態變色：50以上紅，以下綠
             score_color = "#ff4b4b" if score >= 50 else "#008000"
             st.markdown(f"### 💡 AI 評分: <span style='color:{score_color}'>{score} 分</span>", unsafe_allow_html=True)
             with st.expander("🔍 符合評分項目"):
@@ -190,18 +187,17 @@ if ticker:
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         
-        # 象限說明文字 (新增)
-        st.markdown("""
-        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 10px; border: 1px solid #ddd; margin-bottom: 20px;">
-        <h5 style="margin-top:0;">📊 落點解析說明：</h5>
-        <ul style="font-size: 0.95em; margin-bottom:0;">
-            <li><b>右上 (強勢攻擊區)：</b>AI 評分高且漲勢強。標的處於多頭攻擊態勢，適合順勢參與。</li>
-            <li><b>右下 (蓄勢待發區)：</b>AI 評分高但今日走勢受壓。基本面與技術指標優異，具備補漲潛力。</li>
-            <li><b>左上 (過熱投機區)：</b>今日漲幅高但 AI 評分低。可能受短線消息帶動，需留意回檔風險。</li>
-            <li><b>左下 (弱勢觀望區)：</b>評分與漲跌皆疲弱。標的處於空頭或盤整，建議持續觀察。</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
+        # 使用 st.container 與更強健的 HTML 確保說明文字正常顯示
+        with st.container():
+            st.markdown(f"""
+            <div style="background-color: #f8f9fa; padding: 16px; border-radius: 8px; border: 1px solid #ced4da; margin-bottom: 20px;">
+                <h5 style="margin: 0 0 10px 0; color: #333;">📊 落點解析說明：</h5>
+                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>右上 (強勢攻擊區)：</b>AI 評分高且漲勢強。標的處於多頭攻擊態勢，適合順勢參與。</p>
+                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>右下 (蓄勢待發區)：</b>AI 評分高但今日走勢受壓。基本面與技術優異，具補漲潛力。</p>
+                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>左上 (過熱投機區)：</b>今日漲幅高但評分低。受短線消息帶動，需留意回檔風險。</p>
+                <p style="margin: 4px 0; font-size: 14px; color: #444;">• <b>左下 (弱勢觀望區)：</b>評分與漲跌皆疲弱。標的處於空頭或盤整，建議持續觀察。</p>
+            </div>
+            """, unsafe_allow_html=True)
 
         compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
         if ticker not in compare: compare.append(ticker)
@@ -221,9 +217,9 @@ if ticker:
             for i, txt in enumerate(q_df['N']):
                 ax_q.annotate(txt, (q_df['S'][i], q_df['C'][i]), fontsize=9, xytext=(4,4), textcoords='offset points', fontweight='bold')
             ax_q.axvline(50, color='gray', ls='--', alpha=0.3)
-            ax_q.axhline(0, color='gray', ls='--', alpha=0.3)
+            ax_q.axhline(0, color='gray', ls='--', alpha=0.5)
             ax_q.set_xlabel("AI 評分 (分)", fontsize=10)
-            ax_q.set_ylabel("漲跌幅 (%)", fontsize=10)
+            ax_q.set_ylabel("今日漲跌幅 (%)", fontsize=10)
             st.pyplot(fig_q)
 
 st.markdown("---")
