@@ -36,6 +36,7 @@ def get_company_name(ticker):
 def fetch_stock_data(ticker, period="7y"):
     try:
         time.sleep(0.3)
+        # 統一所有查詢都使用相同 Period 確保評分同步
         return yf.Ticker(ticker).history(period=period)
     except:
         return pd.DataFrame()
@@ -48,22 +49,30 @@ def calculate_rsi(df, periods=14):
     return 100 - (100 / (1 + rs))
 
 def evaluate_stock_100(df):
-    if df.empty or len(df) < 20: return 0, []
+    if df.empty or len(df) < 1200: 
+        # 如果數據不足 1200 根(約 5 年)，則調降計算標準
+        min_p = 100
+    else:
+        min_p = 1200
+
     score, reasons = 0, []
     try:
         c = df['Close'].iloc[-1]
         m20 = df['Close'].rolling(20).mean()
         m120 = df['Close'].rolling(120).mean()
+        # 強制使用 1200 天作為長線基準
         m1200 = df['Close'].rolling(1200, min_periods=100).mean()
         std20 = df['Close'].rolling(20).std()
         rsi = calculate_rsi(df).iloc[-1]
         vol, avg_vol = df['Volume'].iloc[-1], df['Volume'].tail(5).mean()
         
         tests = [
-            (c > m20.iloc[-1], "股價站上月線"), (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
+            (c > m20.iloc[-1], "股價站上月線"), 
+            (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
             (c > m120.iloc[-1] if not np.isnan(m120.iloc[-1]) else False, "股價站上半年線"),
             (m120.iloc[-1] > m120.iloc[-5] if not np.isnan(m120.iloc[-1]) else False, "長線趨勢翻正"),
-            (50 < rsi < 75, "RSI 強勢攻擊區"), (vol > avg_vol * 1.5, "量能顯著放大"),
+            (50 < rsi < 75, "RSI 強勢攻擊區"), 
+            (vol > avg_vol * 1.5, "量能顯著放大"),
             (c > m1200.iloc[-1] if not np.isnan(m1200.iloc[-1]) else True, "高於五年基期"),
             (c < m20.iloc[-1] + std20.iloc[-1]*2, "尚未觸及布林上軌"),
             (c > np.sum(((df['High']+df['Low']+df['Close'])/3)*df['Volume'])/np.sum(df['Volume']), "站穩 VWAP 均價"),
@@ -78,7 +87,6 @@ def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
     
-    # 需求 2：增加布林中軸線
     ma20 = df_slice['Close'].rolling(20).mean()
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
@@ -90,8 +98,9 @@ def plot_v6_pro(df, title, days, resample_rule):
     
     ax1.plot(df_slice.index, df_slice['Close'], color='black', linewidth=2, label='收盤價')
     
-    ma120 = df['Close'].rolling(120).mean().tail(days)
-    ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(days)
+    # 均線繪製 (從完整數據計算)
+    ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
+    ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(len(df_slice))
     ax1.plot(df_slice.index, ma120, label='半年線 (MA120)', color='red', ls='--', lw=1.2)
     ax1.plot(df_slice.index, ma1200, label='五年線 (MA1200)', color='green', ls='-.', lw=1.2)
     
@@ -114,26 +123,32 @@ st.sidebar.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# 需求 1：輸入框置頂
 st.sidebar.title("⌨️ 查詢系統")
 query_in = st.sidebar.text_input("輸入股票代號或公司中文", "3675")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🚩 潛力參考名單")
+
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW"]
+    # 常用監控名單
+    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "2303.TW", "3037.TW", "0050.TW"]
     for t in test_list:
-        d = fetch_stock_data(t, period="1y")
+        # 同步修正：此處必須與主查詢使用相同的 period="7y"
+        d = fetch_stock_data(t, period="7y") 
         s, _ = evaluate_stock_100(d)
         if s >= 75: p_list.append((get_company_name(t), t.split('.')[0], s))
     return sorted(p_list, key=lambda x: x[2], reverse=True)
 
+# 顯示側邊欄名單
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div class="potential-item"><b>{name}</b> ({code})<br>AI 評分: <span class="potential-score">{sc} 分</span></div>', unsafe_allow_html=True)
 
 st.title("🚀 2026 AI 台股決策系統 V6 Pro")
 
+# 智慧代號轉換
 ticker = query_in
 name_to_ticker = {v: k for k, v in STOCK_DB.items()}
 if query_in in name_to_ticker:
@@ -155,33 +170,32 @@ if ticker:
         pct = ((lp - pp)/pp)*100
         p_color = "red" if pct > 0 else ("green" if pct < 0 else "black")
         
-        # 需求 4：抓取大盤資料
-        twii = fetch_stock_data("^TWII", period="5d")
+        # 抓取大盤
+        twii = fetch_stock_data("^TWII", period="7y")
         t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
         t_pct = ((t_lp - t_pp)/t_pp)*100
         t_color = "red" if t_pct > 0 else "green"
 
-        # 需求 1：調整顯示順序
+        # 佈局調整
         st.markdown(f"### 📋 查詢標的：{ticker} - {c_name}")
         st.markdown(f"🕒 最後收盤日：{last_date}")
         
         col1, col2 = st.columns([1.5, 1])
         with col1:
             st.markdown(f"## 現價: **{lp:,.2f}** <span style='color:{p_color}'>({pct:+.2f}%)</span>", unsafe_allow_html=True)
-            # 需求 4：顯示大盤資訊
             st.markdown(f"🔴 大盤指數: **{t_lp:,.2f}** <span style='color:{t_color}'>({t_pct:+.2f}%)</span>", unsafe_allow_html=True)
         
         with col2:
             st.markdown(f"### 💡 AI 評分: <span style='color:#ff4b4b'>{score} 分</span>", unsafe_allow_html=True)
-            # 需求 3：顯示符合的評分項目
+            # 需求：顯示評分項目
             with st.expander("🔍 評分明細"):
                 for t in tags:
                     st.write(f"✅ {t}")
 
         st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖 (含布林中軸)", 130, '3D'))
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖 (含布林中軸/半年線)", 130, '3D'))
         st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年長線循環圖", 1250, 'W'))
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年長線循環圖 (含五年均線)", 1250, 'W'))
 
         # 象限圖
         st.markdown("---")
@@ -190,7 +204,7 @@ if ticker:
         if ticker not in compare: compare.append(ticker)
         q_list = []
         for t_item in compare:
-            d_q = fetch_stock_data(t_item, period="5y")
+            d_q = fetch_stock_data(t_item, period="7y")
             if d_q.empty: continue
             s_q, _ = evaluate_stock_100(d_q)
             c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
@@ -208,6 +222,6 @@ if ticker:
             ax_q.set_xlim(0, 105); ax_q.set_xlabel("AI 評分 (分)"); ax_q.set_ylabel("今日漲跌幅 (%)")
             st.pyplot(fig_q)
 
-# 需求 5：網頁底部警示詞
+# 底部警示
 st.markdown("---")
 st.markdown("<p style='color:red; font-size: 0.8em; text-align: center;'>投資一定有風險，基金投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
