@@ -177,4 +177,110 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
-st.markdown("<h1>🚀 台股｜AI 諸
+st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
+
+ticker = query_in
+name_to_ticker = {v: k for k, v in STOCK_DB.items()}
+if query_in in name_to_ticker: ticker = name_to_ticker[query_in]
+elif query_in.isdigit(): ticker = query_in + ".TW"
+
+if ticker:
+    hist = fetch_stock_data(ticker, period="7y")
+    if hist.empty and ".TW" in ticker:
+        ticker = ticker.replace(".TW", ".TWO")
+        hist = fetch_stock_data(ticker, period="7y")
+        
+    if not hist.empty:
+        c_name = get_company_name(ticker)
+        score, tags = evaluate_stock_100(hist)
+        last_date = hist.index[-1].strftime('%Y-%m-%d')
+        lp, pp = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
+        pct = ((lp - pp)/pp)*100
+        pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
+        
+        twii = fetch_stock_data("^TWII", period="7y")
+        t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
+        t_pct = ((t_lp - t_pp)/t_pp)*100
+        t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
+        
+        st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.markdown(f"""
+            <div class='data-card'>
+                <span style='color: #AAA;'>現價</span><br>
+                <span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> 
+                <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
+                <div style='color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; display:inline-block; border:1px solid #444; margin-top:10px;'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            score_color = "#FF4B4B" if score >= 50 else "#00FF7F"
+            st.markdown(f"""
+            <div class='data-card'>
+                <span style='color: #AAA;'>AI 評分</span><br>
+                <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score} 分</span>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("🔍 決策依據"):
+                for t in tags: st.write(f"✅ {t}")
+
+        st.markdown("---")
+        
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
+        st.markdown("---")
+        
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
+
+        st.markdown("---")
+        st.subheader("📍 潛力象限分析")
+        
+        # 修正後的解析說明區塊
+        st.markdown(f"""
+        <div class="analysis-container">
+            <b style="color: #FF4B4B; font-size: 1.1rem;">📊 落點解析說明：</b><br>
+            <span style="font-size: 0.95rem;">
+            • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的處於多頭攻擊態勢。<br>
+            • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日走勢受壓。具備補漲潛力。<br>
+            • <b>左上 (過熱投機區)：</b> 今日漲幅高但 AI 評分低。留意短線回檔風險。<br>
+            • <b>左下 (弱勢觀望區)：</b> 評分與漲跌皆疲弱。建議持續觀察。
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
+        if ticker not in compare: compare.append(ticker)
+        q_list = []
+        for t_item in compare:
+            d_q = fetch_stock_data(t_item, period="7y")
+            if d_q.empty: continue
+            s_q, _ = evaluate_stock_100(d_q)
+            c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
+            q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
+        
+        if q_list:
+            q_df = pd.DataFrame(q_list)
+            fig_q, ax_q = plt.subplots(figsize=(10, 6))
+            colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
+            ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5)
+            for i, txt in enumerate(q_df['N']):
+                is_target = (q_df['T'].iloc[i] == ticker)
+                font_size = 18 if is_target else 9
+                color_val = 'white' if is_target else '#CCCCCC'
+                ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), 
+                            fontsize=font_size, xytext=(5,5), textcoords='offset points', 
+                            fontweight='bold', color=color_val)
+            
+            # 白色虛線指標線
+            ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
+            ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
+            
+            ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
+            fig_q.patch.set_alpha(0.0)
+            
+            st.pyplot(fig_q)
+
+st.markdown("---")
+st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
