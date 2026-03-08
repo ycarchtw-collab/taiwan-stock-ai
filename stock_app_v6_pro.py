@@ -84,13 +84,13 @@ def plot_v6_pro(df, title, days, resample_rule):
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
     
-    # 修正：布林通道顏色改為明顯的灰藍色，填充飽和度提升
+    # 布林通道顏色強化 (灰藍色 AABBDD)
     ax1.plot(df_slice.index, up, color='#AABBDD', alpha=0.5, lw=0.8, label='布林上軌')
     ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(中軸)')
     ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.5, lw=0.8, label='布林下軌')
     ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.12)
     
-    # 维持 1.75 宽度
+    # 收盤價線寬度細化 (1.75)
     ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.75, label='收盤價', zorder=5)
     
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
@@ -129,8 +129,21 @@ if os.path.exists('孔明看盤.png'):
         backdrop-filter: blur(6px); z-index: -1;
     }}
     [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; }}
-    h1 {{ font-size: clamp(1.2rem, 4vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 4px #000; white-space: nowrap; }}
-    .stMarkdown, .stMetric, .stExpander, .stInfo {{ background-color: rgba(0, 0, 0, 0.5) !important; backdrop-filter: blur(10px); padding: 10px; border-radius: 8px; margin-bottom: 10px; }}
+    
+    /* 修正關鍵：強化手機端標題字體大小 (最小基準提升至 1.8rem) */
+    h1 {{ 
+        font-size: clamp(1.8rem, 6vw, 3rem) !important; 
+        color: #FFFFFF !important; 
+        text-shadow: 2px 2px 6px #000;
+        white-space: nowrap;
+        font-weight: 800 !important;
+    }}
+    
+    .stMarkdown, .stMetric, .stExpander, .stInfo {{ 
+        background-color: rgba(0, 0, 0, 0.5) !important; 
+        backdrop-filter: blur(10px); 
+        padding: 10px; border-radius: 8px; margin-bottom: 10px; 
+    }}
     .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }}
     </style>
     """
@@ -156,6 +169,7 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
+# 移除羽扇小圖，強化標題
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
 ticker = query_in
@@ -235,13 +249,14 @@ if ticker:
             
             for i, txt in enumerate(q_df['N']):
                 is_target = (q_df['T'].iloc[i] == ticker)
+                # 查詢標的名字放大 2 倍 (18)
                 font_size = 18 if is_target else 9
                 color_val = 'white' if is_target else '#CCCCCC'
                 ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), 
                             fontsize=font_size, xytext=(5,5), textcoords='offset points', 
                             fontweight='bold', color=color_val)
             
-            # 修正：象限圖內指標線改為明顯的白色虛線
+            # 象限圖指標線強化為白色虛線
             ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
             ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
             
