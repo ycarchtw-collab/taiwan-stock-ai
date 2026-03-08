@@ -84,13 +84,13 @@ def plot_v6_pro(df, title, days, resample_rule):
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
     
-    # 修正 1：布林通道顏色調淺灰 50% (使用更淡的灰色與透明度)
-    ax1.plot(df_slice.index, up, color='#888888', alpha=0.15, lw=0.6, label='布林上軌')
-    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.6, lw=1.0, ls='--', label='月線(中軸)')
-    ax1.plot(df_slice.index, dn, color='#888888', alpha=0.15, lw=0.6, label='布林下軌')
-    ax1.fill_between(df_slice.index, up, dn, color='#888888', alpha=0.04)
+    # 修正：布林通道顏色改為明顯的灰藍色，填充飽和度提升
+    ax1.plot(df_slice.index, up, color='#AABBDD', alpha=0.5, lw=0.8, label='布林上軌')
+    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(中軸)')
+    ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.5, lw=0.8, label='布林下軌')
+    ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.12)
     
-    # 修正 2：收盤價線寬度調減 30% (從 2.5 減至 1.75)
+    # 维持 1.75 宽度
     ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.75, label='收盤價', zorder=5)
     
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
@@ -129,27 +129,9 @@ if os.path.exists('孔明看盤.png'):
         backdrop-filter: blur(6px); z-index: -1;
     }}
     [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; }}
-    
-    /* 修正 4：解決手機排版擠壓，縮小手機端字體 */
-    h1 {{ 
-        font-size: clamp(1.2rem, 4vw, 2.5rem) !important; 
-        color: #FFFFFF !important; 
-        text-shadow: 2px 2px 4px #000;
-        white-space: nowrap;
-    }}
-    
-    .stMarkdown, .stMetric, .stExpander, .stInfo {{
-        background-color: rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(10px);
-        padding: 10px; border-radius: 8px; margin-bottom: 10px;
-    }}
-    
-    .data-card {{
-        background-color: rgba(0, 0, 0, 0.7); 
-        padding: 20px; border-radius: 12px; 
-        border: 1px solid rgba(255,255,255,0.1); 
-        margin-bottom: 15px;
-    }}
+    h1 {{ font-size: clamp(1.2rem, 4vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 4px #000; white-space: nowrap; }}
+    .stMarkdown, .stMetric, .stExpander, .stInfo {{ background-color: rgba(0, 0, 0, 0.5) !important; backdrop-filter: blur(10px); padding: 10px; border-radius: 8px; margin-bottom: 10px; }}
+    .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }}
     </style>
     """
 else:
@@ -174,7 +156,6 @@ def scan_potential():
 for name, code, sc in scan_potential():
     st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
-# 修正 4：更名標題並取消羽扇圖標
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
 ticker = query_in
@@ -252,7 +233,6 @@ if ticker:
             colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
             ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5)
             
-            # 修正 3：象限圖內輸入的公司名稱字體放大 2 倍
             for i, txt in enumerate(q_df['N']):
                 is_target = (q_df['T'].iloc[i] == ticker)
                 font_size = 18 if is_target else 9
@@ -260,8 +240,11 @@ if ticker:
                 ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), 
                             fontsize=font_size, xytext=(5,5), textcoords='offset points', 
                             fontweight='bold', color=color_val)
-                            
-            ax_q.axvline(50, color='gray', ls='--', alpha=0.3); ax_q.axhline(0, color='gray', ls='--', alpha=0.3)
+            
+            # 修正：象限圖內指標線改為明顯的白色虛線
+            ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
+            ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
+            
             ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
             fig_q.patch.set_alpha(0.0)
             
