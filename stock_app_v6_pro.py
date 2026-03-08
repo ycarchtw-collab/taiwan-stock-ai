@@ -84,12 +84,14 @@ def plot_v6_pro(df, title, days, resample_rule):
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
     
-    ax1.plot(df_slice.index, up, color='#00BFFF', alpha=0.4, lw=1, label='布林上軌')
-    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(中軸)')
-    ax1.plot(df_slice.index, dn, color='#00BFFF', alpha=0.4, lw=1, label='布林下軌')
-    ax1.fill_between(df_slice.index, up, dn, color='#00BFFF', alpha=0.08)
+    # 修正 1：布林通道顏色調淺灰 50% (使用更淡的灰色與透明度)
+    ax1.plot(df_slice.index, up, color='#888888', alpha=0.15, lw=0.6, label='布林上軌')
+    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.6, lw=1.0, ls='--', label='月線(中軸)')
+    ax1.plot(df_slice.index, dn, color='#888888', alpha=0.15, lw=0.6, label='布林下軌')
+    ax1.fill_between(df_slice.index, up, dn, color='#888888', alpha=0.04)
     
-    ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=2.5, label='收盤價', zorder=5)
+    # 修正 2：收盤價線寬度調減 30% (從 2.5 減至 1.75)
+    ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.75, label='收盤價', zorder=5)
     
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
     ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(len(df_slice))
@@ -112,7 +114,6 @@ def plot_v6_pro(df, title, days, resample_rule):
 # --- 4. 網頁 UI 佈局 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-# 二次視覺強化 CSS
 if os.path.exists('孔明看盤.png'):
     with open('孔明看盤.png', "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode()
@@ -124,37 +125,30 @@ if os.path.exists('孔明看盤.png'):
     }}
     [data-testid="stAppViewContainer"]::before {{
         content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        background: linear-gradient(rgba(0,0,0,0.8), rgba(0,0,0,0.5), rgba(0,0,0,0.8));
+        background: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.6), rgba(0,0,0,0.85));
         backdrop-filter: blur(6px); z-index: -1;
     }}
-    [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; border-right: 1px solid #444; }}
+    [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; }}
     
-    /* 修正關鍵：為內容區塊加上遮罩底層 */
+    /* 修正 4：解決手機排版擠壓，縮小手機端字體 */
+    h1 {{ 
+        font-size: clamp(1.2rem, 4vw, 2.5rem) !important; 
+        color: #FFFFFF !important; 
+        text-shadow: 2px 2px 4px #000;
+        white-space: nowrap;
+    }}
+    
     .stMarkdown, .stMetric, .stExpander, .stInfo {{
         background-color: rgba(0, 0, 0, 0.5) !important;
         backdrop-filter: blur(10px);
         padding: 10px; border-radius: 8px; margin-bottom: 10px;
     }}
     
-    /* 側欄文字顏色強制白色 */
-    .potential-item {{ 
-        padding: 10px; border-radius: 6px; margin-bottom: 6px; background-color: rgba(255, 255, 255, 0.05); 
-        border-left: 5px solid #ff4b4b; color: #FFFFFF !important; font-weight: bold;
-    }}
-    
-    /* 數據卡片強化 */
     .data-card {{
         background-color: rgba(0, 0, 0, 0.7); 
         padding: 20px; border-radius: 12px; 
         border: 1px solid rgba(255,255,255,0.1); 
         margin-bottom: 15px;
-    }}
-    
-    /* 大盤與標題文字陰影 */
-    h1, h4 {{ color: #FFFFFF !important; text-shadow: 2px 2px 4px #000; }}
-    .market-index {{ 
-        font-size: 0.95em; color: #FFFFFF !important; font-weight: bold; background: rgba(0,0,0,0.8); 
-        padding: 8px 15px; border-radius: 6px; border: 1px solid #555; display: inline-block;
     }}
     </style>
     """
@@ -163,7 +157,6 @@ else:
 
 st.markdown(bg_style, unsafe_allow_html=True)
 
-# 側欄
 st.sidebar.title("⌨️ 諸葛神算")
 query_in = st.sidebar.text_input("輸入代號或名稱", "3675")
 
@@ -171,7 +164,7 @@ st.sidebar.markdown("---")
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "6282.TW", "1513.TW", "1519.TW"]
+    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "1513.TW", "1519.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="7y") 
         s, _ = evaluate_stock_100(d)
@@ -179,9 +172,10 @@ def scan_potential():
     return sorted(p_list, key=lambda x: x[2], reverse=True)[:10]
 
 for name, code, sc in scan_potential():
-    st.sidebar.markdown(f'<div class="potential-item">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
-st.markdown("<h1>🚀 台股｜AI 諸葛孔明 &#129681;</h1>", unsafe_allow_html=True)
+# 修正 4：更名標題並取消羽扇圖標
+st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
 ticker = query_in
 name_to_ticker = {v: k for k, v in STOCK_DB.items()}
@@ -214,9 +208,9 @@ if ticker:
             st.markdown(f"""
             <div class='data-card'>
                 <span style='color: #AAA;'>現價</span><br>
-                <span style='font-size: 2.5rem; font-weight: bold; color: white;'>{lp:,.2f}</span> 
-                <span style='color:{pct_color}; font-size: 1.5rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
-                <div class='market-index'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
+                <span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> 
+                <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
+                <div style='color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; display:inline-block; border:1px solid #444; margin-top:10px;'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -225,7 +219,7 @@ if ticker:
             st.markdown(f"""
             <div class='data-card'>
                 <span style='color: #AAA;'>AI 評分</span><br>
-                <span style='font-size: 2.5rem; font-weight: bold; color: {score_color};'>{score} 分</span>
+                <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score} 分</span>
             </div>
             """, unsafe_allow_html=True)
             with st.expander("🔍 決策依據"):
@@ -240,15 +234,7 @@ if ticker:
 
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
-        
-        # 解析說明底色強化
-        st.markdown(f"""
-        <div style='background-color: rgba(0,0,0,0.85); padding: 15px; border-radius: 10px; border: 1px solid #ff4b4b; color: white;'>
-            <b style='color:#ff4b4b; font-size: 1.1em;'>📊 落點解析說明：</b><br>
-            • 右上 (強勢)：評分高漲勢強 / 右下 (蓄勢)：評分高但壓回<br>
-            • 左上 (過熱)：評分低但暴漲 / 左下 (弱勢)：評分趨勢皆疲弱
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("📊 右上：強勢 / 右下：蓄勢 / 左上：過熱 / 左下：弱勢")
 
         compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
         if ticker not in compare: compare.append(ticker)
@@ -265,8 +251,16 @@ if ticker:
             fig_q, ax_q = plt.subplots(figsize=(10, 6))
             colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
             ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5)
+            
+            # 修正 3：象限圖內輸入的公司名稱字體放大 2 倍
             for i, txt in enumerate(q_df['N']):
-                ax_q.annotate(txt, (q_df['S'][i], q_df['C'][i]), fontsize=10, xytext=(4,4), textcoords='offset points', fontweight='bold', color='white')
+                is_target = (q_df['T'].iloc[i] == ticker)
+                font_size = 18 if is_target else 9
+                color_val = 'white' if is_target else '#CCCCCC'
+                ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), 
+                            fontsize=font_size, xytext=(5,5), textcoords='offset points', 
+                            fontweight='bold', color=color_val)
+                            
             ax_q.axvline(50, color='gray', ls='--', alpha=0.3); ax_q.axhline(0, color='gray', ls='--', alpha=0.3)
             ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
             fig_q.patch.set_alpha(0.0)
