@@ -33,19 +33,15 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 (含財報數據抓取) ---
+# --- 3. 核心運算 (強化即時性與特殊代碼相容) ---
 @st.cache_data(ttl=60)
-def fetch_stock_data_with_info(ticker, period="7y"):
+def fetch_stock_data(ticker, period="7y"):
     try:
         stock = yf.Ticker(ticker)
+        # 抓取日線
         df = stock.history(period=period, interval="1d", auto_adjust=True)
         
-        # 抓取財報資訊 (本益比與 EPS)
-        info = stock.info
-        pe_ratio = info.get('trailingPE', 'N/A')
-        eps = info.get('trailingEps', 'N/A')
-        
-        # 開盤時段即時數據補足
+        # 開盤時段抓取 1m 資料補足今日即時數據
         now = datetime.now()
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
@@ -59,9 +55,9 @@ def fetch_stock_data_with_info(ticker, period="7y"):
                         'Volume': today_df['Volume'].sum()
                     }, index=[last_time])
                     df = pd.concat([df, new_row])
-        return df, pe_ratio, eps
+        return df
     except:
-        return pd.DataFrame(), 'N/A', 'N/A'
+        return pd.DataFrame()
 
 def calculate_rsi(df, periods=14):
     delta = df['Close'].diff()
@@ -80,7 +76,8 @@ def evaluate_stock_100(df):
         m1200 = df['Close'].rolling(1200, min_periods=100).mean()
         std20 = df['Close'].rolling(20).std()
         rsi = calculate_rsi(df).iloc[-1]
-        vol, avg_vol = df['Volume'].iloc[-1], df['Volume'].tail(5).mean()
+        vol = df['Volume'].iloc[-1]
+        avg_vol = df['Volume'].tail(5).mean()
         
         tests = [
             (c > m20.iloc[-1], "股價站上月線"), (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
@@ -166,13 +163,13 @@ st.sidebar.title("⌨️ 諸葛神算")
 query_in = st.sidebar.text_input("輸入代號 (如 2330)", "3675").upper()
 
 st.sidebar.markdown("---")
-# 側欄名單維持抓取日線邏輯
+# 側欄監控名單
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
     test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "1513.TW", "1519.TW"]
     for t in test_list:
-        d, _, _ = fetch_stock_data_with_info(t, period="7y") 
+        d = fetch_stock_data(t, period="7y") 
         if not d.empty:
             s, _ = evaluate_stock_100(d)
             p_list.append((get_company_name(t), t.split('.')[0], s))
@@ -183,28 +180,35 @@ for name, code, sc in scan_potential():
 
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
-# 特殊代碼補完邏輯
+# 修正：針對 00981A 等代碼的修正邏輯
 ticker = query_in
 if ticker:
     if not (ticker.endswith(".TW") or ticker.endswith(".TWO")):
+        # 先試上市
         test_ticker = ticker + ".TW"
-        hist_test, _, _ = fetch_stock_data_with_info(test_ticker, period="1mo")
-        ticker = test_ticker if not hist_test.empty else ticker + ".TWO"
+        hist_test = fetch_stock_data(test_ticker, period="1mo")
+        if hist_test.empty:
+            ticker = ticker + ".TWO" # 失敗則轉上櫃
+        else:
+            ticker = test_ticker
 
-    hist, pe, eps = fetch_stock_data_with_info(ticker, period="7y")
+    hist = fetch_stock_data(ticker, period="7y")
     
     if not hist.empty:
         c_name = get_company_name(ticker)
         score, tags = evaluate_stock_100(hist)
         last_date = hist.index[-1].strftime('%Y-%m-%d')
         lp = hist['Close'].iloc[-1]
+        
+        # 抓取昨收計算漲跌
         prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
         pct = ((lp - prev_close)/prev_close)*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
         
-        twii, _, _ = fetch_stock_data_with_info("^TWII", period="7y")
+        twii = fetch_stock_data("^TWII", period="7y")
         if not twii.empty:
-            t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
+            t_lp = twii['Close'].iloc[-1]
+            t_pp = twii['Close'].iloc[-2]
             t_pct = ((t_lp - t_pp)/t_pp)*100
             t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
         else:
@@ -214,16 +218,11 @@ if ticker:
         
         col1, col2 = st.columns([1, 1])
         with col1:
-            # 修正：在現價下方新增本益比與 EPS
             st.markdown(f"""
             <div class='data-card'>
                 <span style='color: #AAA;'>現價</span><br>
                 <span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> 
                 <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
-                <div style='margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;'>
-                    <span style='color: #AAA; font-size: 0.9rem;'>本益比 (P/E):</span> <span style='color: #66CCFF; font-weight: bold;'>{pe}</span><br>
-                    <span style='color: #AAA; font-size: 0.9rem;'>每股盈餘 (EPS):</span> <span style='color: #00FF7F; font-weight: bold;'>{eps}</span>
-                </div>
                 <div style='color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; display:inline-block; border:1px solid #444; margin-top:10px;'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
             </div>
             """, unsafe_allow_html=True)
@@ -264,7 +263,7 @@ if ticker:
         if ticker not in compare: compare.append(ticker)
         q_list = []
         for t_item in compare:
-            d_q, _, _ = fetch_stock_data_with_info(t_item, period="7y")
+            d_q = fetch_stock_data(t_item, period="7y")
             if d_q.empty: continue
             s_q, _ = evaluate_stock_100(d_q)
             c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
