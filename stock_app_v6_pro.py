@@ -33,21 +33,26 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 (含財報數據抓取) ---
+# --- 3. 核心運算 (含財報數據抓取與格式化) ---
 @st.cache_data(ttl=60)
 def fetch_stock_data_with_info(ticker, period="7y"):
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval="1d", auto_adjust=True)
         
+        # 抓取財報資訊
         info = stock.info
-        pe_ratio = info.get('trailingPE')
-        eps = info.get('trailingEps')
+        pe_raw = info.get('trailingPE', 'N/A')
         
-        # 數值格式化處理
-        pe_val = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
-        eps_val = f"{eps:.2f}" if isinstance(eps, (int, float)) else "N/A"
+        # 修正：將本益比鎖定在小數點第二位
+        if isinstance(pe_raw, (int, float)):
+            pe_ratio = f"{pe_raw:.2f}"
+        else:
+            pe_ratio = pe_raw
+            
+        eps = info.get('trailingEps', 'N/A')
         
+        # 開盤時段即時數據補足
         now = datetime.now()
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
@@ -61,7 +66,7 @@ def fetch_stock_data_with_info(ticker, period="7y"):
                         'Volume': today_df['Volume'].sum()
                     }, index=[last_time])
                     df = pd.concat([df, new_row])
-        return df, pe_val, eps_val
+        return df, pe_ratio, eps
     except:
         return pd.DataFrame(), 'N/A', 'N/A'
 
@@ -73,8 +78,8 @@ def calculate_rsi(df, periods=14):
     return 100 - (100 / (1 + rs))
 
 def evaluate_stock_100(df):
-    if df.empty or len(df) < 100: return 0.0, []
-    score, reasons = 0.0, []
+    if df.empty or len(df) < 100: return 0, []
+    score, reasons = 0, []
     try:
         c = df['Close'].iloc[-1]
         m20 = df['Close'].rolling(20).mean()
@@ -95,8 +100,8 @@ def evaluate_stock_100(df):
             (c > df['Close'].iloc[-2], "維持連漲慣性")
         ]
         for cond, msg in tests:
-            if cond: score += 10.0; reasons.append(msg)
-    except: return 0.0, []
+            if cond: score += 10; reasons.append(msg)
+    except: return 0, []
     return score, reasons
 
 def plot_v6_pro(df, title, days, resample_rule):
@@ -180,7 +185,7 @@ def scan_potential():
     return sorted(p_list, key=lambda x: x[2], reverse=True)[:10]
 
 for name, code, sc in scan_potential():
-    st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc:.2f}分</span></div>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
@@ -208,7 +213,7 @@ if ticker:
             t_pct = ((t_lp - t_pp)/t_pp)*100
             t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
         else:
-            t_lp, t_pct, t_pct_color = 0.00, 0.00, "white"
+            t_lp, t_pct, t_pct_color = 0, 0, "white"
         
         st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
         
@@ -228,11 +233,11 @@ if ticker:
             """, unsafe_allow_html=True)
 
         with col2:
-            score_color = "#FF4B4B" if score >= 50.0 else "#00FF7F"
+            score_color = "#FF4B4B" if score >= 50 else "#00FF7F"
             st.markdown(f"""
             <div class='data-card'>
                 <span style='color: #AAA;'>AI 評分</span><br>
-                <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score:.2f} 分</span>
+                <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score} 分</span>
             </div>
             """, unsafe_allow_html=True)
             with st.expander("🔍 決策依據"):
@@ -278,8 +283,8 @@ if ticker:
                 color_val = 'white' if is_target else '#CCCCCC'
                 ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), fontsize=font_size, xytext=(5,5), textcoords='offset points', fontweight='bold', color=color_val)
             
-            ax_q.axvline(50.00, color='white', ls='--', alpha=0.6, lw=1.2)
-            ax_q.axhline(0.00, color='white', ls='--', alpha=0.6, lw=1.2)
+            ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
+            ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
             ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
             fig_q.patch.set_alpha(0.0)
             st.pyplot(fig_q)
