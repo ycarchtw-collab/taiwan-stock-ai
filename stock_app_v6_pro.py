@@ -33,24 +33,19 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 (數據抓取與格式化) ---
+# --- 3. 核心運算 (含財報數據抓取) ---
 @st.cache_data(ttl=60)
 def fetch_stock_data_with_info(ticker, period="7y"):
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval="1d", auto_adjust=True)
         
-        if df.empty:
-            return pd.DataFrame(), 'N/A', 'N/A'
-            
-        # 抓取財報資訊
+        # 抓取財報資訊 (本益比與 EPS)
         info = stock.info
-        pe_raw = info.get('trailingPE', 'N/A')
-        # 本益比鎖定小數點第二位
-        pe_ratio = f"{pe_raw:.2f}" if isinstance(pe_raw, (int, float)) else pe_raw
+        pe_ratio = info.get('trailingPE', 'N/A')
         eps = info.get('trailingEps', 'N/A')
         
-        # 開盤時段即時數據補足 (03/09 今日數據)
+        # 開盤時段即時數據補足
         now = datetime.now()
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
@@ -168,10 +163,10 @@ else:
 st.markdown(bg_style, unsafe_allow_html=True)
 
 st.sidebar.title("⌨️ 諸葛神算")
-query_in = st.sidebar.text_input("輸入代號 (如 2330 或 3675)", "3675").upper()
+query_in = st.sidebar.text_input("輸入代號 (如 2330)", "3675").upper()
 
 st.sidebar.markdown("---")
-# 側欄監控名單
+# 側欄名單維持抓取日線邏輯
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
@@ -188,121 +183,112 @@ for name, code, sc in scan_potential():
 
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
-# 核心優化：代碼自動判斷邏輯 (解決 3675 找不到的問題)
+# 特殊代碼補完邏輯
 ticker = query_in
 if ticker:
     if not (ticker.endswith(".TW") or ticker.endswith(".TWO")):
-        # 1. 先測試上市代碼 (.TW)
-        test_ticker_tw = ticker + ".TW"
-        hist_tw, pe_tw, eps_tw = fetch_stock_data_with_info(test_ticker_tw, period="1mo")
-        if not hist_tw.empty:
-            ticker = test_ticker_tw
+        test_ticker = ticker + ".TW"
+        hist_test, _, _ = fetch_stock_data_with_info(test_ticker, period="1mo")
+        ticker = test_ticker if not hist_test.empty else ticker + ".TWO"
+
+    hist, pe, eps = fetch_stock_data_with_info(ticker, period="7y")
+    
+    if not hist.empty:
+        c_name = get_company_name(ticker)
+        score, tags = evaluate_stock_100(hist)
+        last_date = hist.index[-1].strftime('%Y-%m-%d')
+        lp = hist['Close'].iloc[-1]
+        prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
+        pct = ((lp - prev_close)/prev_close)*100
+        pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
+        
+        twii, _, _ = fetch_stock_data_with_info("^TWII", period="7y")
+        if not twii.empty:
+            t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
+            t_pct = ((t_lp - t_pp)/t_pp)*100
+            t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
         else:
-            # 2. 上市找不到，測試上櫃代碼 (.TWO)
-            test_ticker_two = ticker + ".TWO"
-            hist_two, pe_two, eps_two = fetch_stock_data_with_info(test_ticker_two, period="1mo")
-            if not hist_two.empty:
-                ticker = test_ticker_two
-            else:
-                ticker = None # 兩者都找不到
-
-    if ticker:
-        hist, pe, eps = fetch_stock_data_with_info(ticker, period="7y")
-        if not hist.empty:
-            c_name = get_company_name(ticker)
-            score, tags = evaluate_stock_100(hist)
-            last_date = hist.index[-1].strftime('%Y-%m-%d')
-            lp = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
-            pct = ((lp - prev_close)/prev_close)*100
-            pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
-            
-            twii, _, _ = fetch_stock_data_with_info("^TWII", period="7y")
-            if not twii.empty:
-                t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
-                t_pct = ((t_lp - t_pp)/t_pp)*100
-                t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
-            else:
-                t_lp, t_pct, t_pct_color = 0, 0, "white"
-            
-            st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
-            
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.markdown(f"""
-                <div class='data-card'>
-                    <span style='color: #AAA;'>現價</span><br>
-                    <span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> 
-                    <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
-                    <div style='margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;'>
-                        <span style='color: #AAA; font-size: 0.9rem;'>本益比 (P/E):</span> <span style='color: #66CCFF; font-weight: bold;'>{pe}</span><br>
-                        <span style='color: #AAA; font-size: 0.9rem;'>每股盈餘 (EPS):</span> <span style='color: #00FF7F; font-weight: bold;'>{eps}</span>
-                    </div>
-                    <div style='color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; display:inline-block; border:1px solid #444; margin-top:10px;'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with col2:
-                score_color = "#FF4B4B" if score >= 50 else "#00FF7F"
-                st.markdown(f"""
-                <div class='data-card'>
-                    <span style='color: #AAA;'>AI 評分</span><br>
-                    <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score} 分</span>
-                </div>
-                """, unsafe_allow_html=True)
-                with st.expander("🔍 決策依據"):
-                    for t in tags: st.write(f"✅ {t}")
-
-            st.markdown("---")
-            
-            st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
-            st.markdown("---")
-            
-            st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
-
-            st.markdown("---")
-            st.subheader("📍 潛力象限分析")
+            t_lp, t_pct, t_pct_color = 0, 0, "white"
+        
+        st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            # 修正：在現價下方新增本益比與 EPS
             st.markdown(f"""
-            <div class="analysis-container">
-                <b style="color: #FF4B4B; font-size: 1.15rem;">📊 落點解析說明：</b><br>
-                <span style="font-size: 1rem; line-height: 1.6;">
-                • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的多頭動能極強。<br>
-                • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日壓回。具備補漲潛力。<br>
-                • <b>左上 (過熱投機區)：</b> 評分低但今日漲幅大。留意短線回檔風險。<br>
-                • <b>左下 (弱勢觀望區)：</b> 評分與趨勢皆疲弱。標的目前處於冷灶期。
-                </span>
+            <div class='data-card'>
+                <span style='color: #AAA;'>現價</span><br>
+                <span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> 
+                <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
+                <div style='margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;'>
+                    <span style='color: #AAA; font-size: 0.9rem;'>本益比 (P/E):</span> <span style='color: #66CCFF; font-weight: bold;'>{pe}</span><br>
+                    <span style='color: #AAA; font-size: 0.9rem;'>每股盈餘 (EPS):</span> <span style='color: #00FF7F; font-weight: bold;'>{eps}</span>
+                </div>
+                <div style='color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; display:inline-block; border:1px solid #444; margin-top:10px;'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
             </div>
             """, unsafe_allow_html=True)
 
-            compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
-            if ticker not in compare: compare.append(ticker)
-            q_list = []
-            for t_item in compare:
-                d_q, _, _ = fetch_stock_data_with_info(t_item, period="7y")
-                if d_q.empty: continue
-                s_q, _ = evaluate_stock_100(d_q)
-                c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
-                q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
+        with col2:
+            score_color = "#FF4B4B" if score >= 50 else "#00FF7F"
+            st.markdown(f"""
+            <div class='data-card'>
+                <span style='color: #AAA;'>AI 評分</span><br>
+                <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score} 分</span>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("🔍 決策依據"):
+                for t in tags: st.write(f"✅ {t}")
+
+        st.markdown("---")
+        
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
+        st.markdown("---")
+        
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
+
+        st.markdown("---")
+        st.subheader("📍 潛力象限分析")
+        st.markdown(f"""
+        <div class="analysis-container">
+            <b style="color: #FF4B4B; font-size: 1.15rem;">📊 落點解析說明：</b><br>
+            <span style="font-size: 1rem; line-height: 1.6;">
+            • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的多頭動能極強。<br>
+            • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日壓回。具備補漲潛力。<br>
+            • <b>左上 (過熱投機區)：</b> 評分低但今日漲幅大。留意短線回檔風險。<br>
+            • <b>左下 (弱勢觀望區)：</b> 評分與趨勢皆疲弱。標的目前處於冷灶期。
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
+        if ticker not in compare: compare.append(ticker)
+        q_list = []
+        for t_item in compare:
+            d_q, _, _ = fetch_stock_data_with_info(t_item, period="7y")
+            if d_q.empty: continue
+            s_q, _ = evaluate_stock_100(d_q)
+            c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
+            q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
+        
+        if q_list:
+            q_df = pd.DataFrame(q_list)
+            fig_q, ax_q = plt.subplots(figsize=(10, 6))
+            colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
+            ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5)
+            for i, txt in enumerate(q_df['N']):
+                is_target = (q_df['T'].iloc[i] == ticker)
+                font_size = 18 if is_target else 9
+                color_val = 'white' if is_target else '#CCCCCC'
+                ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), fontsize=font_size, xytext=(5,5), textcoords='offset points', fontweight='bold', color=color_val)
             
-            if q_list:
-                q_df = pd.DataFrame(q_list)
-                fig_q, ax_q = plt.subplots(figsize=(10, 6))
-                colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
-                ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5)
-                for i, txt in enumerate(q_df['N']):
-                    is_target = (q_df['T'].iloc[i] == ticker)
-                    font_size = 18 if is_target else 9
-                    color_val = 'white' if is_target else '#CCCCCC'
-                    ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), fontsize=font_size, xytext=(5,5), textcoords='offset points', fontweight='bold', color=color_val)
-                ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
-                ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
-                ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
-                fig_q.patch.set_alpha(0.0)
-                st.pyplot(fig_q)
-        else:
-            st.warning(f"⚠️ 數據異常，請稍後再試。")
+            ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
+            ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
+            ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
+            fig_q.patch.set_alpha(0.0)
+            
+            st.pyplot(fig_q)
     else:
-        st.error(f"❌ 找不到代碼「{query_in}」，請確認是否為台股上市櫃股票。")
+        st.warning(f"⚠️ 找不到代碼 {ticker} 的數據，請確認代號是否正確。")
 
 st.markdown("---")
 st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
