@@ -7,7 +7,7 @@ import json
 import os
 import time
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- 1. 雲端環境與字體設定 ---
 if os.name == 'posix':
@@ -33,26 +33,27 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 (修正數據抓取邏輯) ---
-@st.cache_data(ttl=60) # 修正：縮短快取至 60 秒確保即時性
+# --- 3. 核心運算 (強化即時性與特殊代碼相容) ---
+@st.cache_data(ttl=60)
 def fetch_stock_data(ticker, period="7y"):
     try:
-        # 強制抓取包含今天的數據
         stock = yf.Ticker(ticker)
+        # 抓取日線
         df = stock.history(period=period, interval="1d", auto_adjust=True)
         
-        # 若當前為開盤時間，嘗試抓取 1m 資料補足今日即時點位
+        # 開盤時段抓取 1m 資料補足今日即時數據
         now = datetime.now()
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
             if not today_df.empty:
-                # 取得最新一筆 1m 資料作為今日日線更新
                 last_price = today_df['Close'].iloc[-1]
                 last_time = today_df.index[-1].replace(hour=0, minute=0, second=0, microsecond=0)
                 if last_time > df.index[-1]:
-                    new_row = pd.DataFrame({'Open': today_df['Open'].iloc[0], 'High': today_df['High'].max(), 
-                                            'Low': today_df['Low'].min(), 'Close': last_price, 
-                                            'Volume': today_df['Volume'].sum()}, index=[last_time])
+                    new_row = pd.DataFrame({
+                        'Open': today_df['Open'].iloc[0], 'High': today_df['High'].max(), 
+                        'Low': today_df['Low'].min(), 'Close': last_price, 
+                        'Volume': today_df['Volume'].sum()
+                    }, index=[last_time])
                     df = pd.concat([df, new_row])
         return df
     except:
@@ -75,7 +76,8 @@ def evaluate_stock_100(df):
         m1200 = df['Close'].rolling(1200, min_periods=100).mean()
         std20 = df['Close'].rolling(20).std()
         rsi = calculate_rsi(df).iloc[-1]
-        vol, avg_vol = df['Volume'].iloc[-1], df['Volume'].tail(5).mean()
+        vol = df['Volume'].iloc[-1]
+        avg_vol = df['Volume'].tail(5).mean()
         
         tests = [
             (c > m20.iloc[-1], "股價站上月線"), (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
@@ -96,7 +98,6 @@ def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
     plt.style.use('dark_background')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
-    
     ma20 = df_slice['Close'].rolling(20).mean()
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
@@ -105,7 +106,6 @@ def plot_v6_pro(df, title, days, resample_rule):
     ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(中軸)')
     ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.5, lw=0.8, label='布林下軌')
     ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.12)
-    
     ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.75, label='收盤價', zorder=5)
     
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
@@ -160,17 +160,19 @@ else:
 st.markdown(bg_style, unsafe_allow_html=True)
 
 st.sidebar.title("⌨️ 諸葛神算")
-query_in = st.sidebar.text_input("輸入代號或名稱", "3675")
+query_in = st.sidebar.text_input("輸入代號 (如 2330)", "3675").upper()
 
 st.sidebar.markdown("---")
+# 側欄監控名單
 @st.cache_data(ttl=3600)
 def scan_potential():
     p_list = []
     test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "1513.TW", "1519.TW"]
     for t in test_list:
         d = fetch_stock_data(t, period="7y") 
-        s, _ = evaluate_stock_100(d)
-        p_list.append((get_company_name(t), t.split('.')[0], s))
+        if not d.empty:
+            s, _ = evaluate_stock_100(d)
+            p_list.append((get_company_name(t), t.split('.')[0], s))
     return sorted(p_list, key=lambda x: x[2], reverse=True)[:10]
 
 for name, code, sc in scan_potential():
@@ -178,29 +180,39 @@ for name, code, sc in scan_potential():
 
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
+# 修正：針對 00981A 等代碼的修正邏輯
 ticker = query_in
-name_to_ticker = {v: k for k, v in STOCK_DB.items()}
-if query_in in name_to_ticker: ticker = name_to_ticker[query_in]
-elif query_in.isdigit(): ticker = query_in + ".TW"
-
 if ticker:
+    if not (ticker.endswith(".TW") or ticker.endswith(".TWO")):
+        # 先試上市
+        test_ticker = ticker + ".TW"
+        hist_test = fetch_stock_data(test_ticker, period="1mo")
+        if hist_test.empty:
+            ticker = ticker + ".TWO" # 失敗則轉上櫃
+        else:
+            ticker = test_ticker
+
     hist = fetch_stock_data(ticker, period="7y")
-    if hist.empty and ".TW" in ticker:
-        ticker = ticker.replace(".TW", ".TWO")
-        hist = fetch_stock_data(ticker, period="7y")
-        
+    
     if not hist.empty:
         c_name = get_company_name(ticker)
         score, tags = evaluate_stock_100(hist)
         last_date = hist.index[-1].strftime('%Y-%m-%d')
-        lp, pp = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
-        pct = ((lp - pp)/pp)*100
+        lp = hist['Close'].iloc[-1]
+        
+        # 抓取昨收計算漲跌
+        prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
+        pct = ((lp - prev_close)/prev_close)*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
         
         twii = fetch_stock_data("^TWII", period="7y")
-        t_lp, t_pp = twii['Close'].iloc[-1], twii['Close'].iloc[-2]
-        t_pct = ((t_lp - t_pp)/t_pp)*100
-        t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
+        if not twii.empty:
+            t_lp = twii['Close'].iloc[-1]
+            t_pp = twii['Close'].iloc[-2]
+            t_pct = ((t_lp - t_pp)/t_pp)*100
+            t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
+        else:
+            t_lp, t_pct, t_pct_color = 0, 0, "white"
         
         st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
         
@@ -235,7 +247,6 @@ if ticker:
 
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
-        
         st.markdown(f"""
         <div class="analysis-container">
             <b style="color: #FF4B4B; font-size: 1.15rem;">📊 落點解析說明：</b><br>
@@ -275,6 +286,8 @@ if ticker:
             fig_q.patch.set_alpha(0.0)
             
             st.pyplot(fig_q)
+    else:
+        st.warning(f"⚠️ 找不到代碼 {ticker} 的數據，請確認代號是否正確。")
 
 st.markdown("---")
 st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
