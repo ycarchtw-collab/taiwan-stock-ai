@@ -7,6 +7,7 @@ import json
 import os
 import time
 import base64
+from datetime import datetime, timedelta
 
 # --- 1. 雲端環境與字體設定 ---
 if os.name == 'posix':
@@ -32,12 +33,28 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# --- 3. 核心運算 ---
-@st.cache_data(ttl=3600)
+# --- 3. 核心運算 (修正數據抓取邏輯) ---
+@st.cache_data(ttl=60) # 修正：縮短快取至 60 秒確保即時性
 def fetch_stock_data(ticker, period="7y"):
     try:
-        time.sleep(0.3)
-        return yf.Ticker(ticker).history(period=period)
+        # 強制抓取包含今天的數據
+        stock = yf.Ticker(ticker)
+        df = stock.history(period=period, interval="1d", auto_adjust=True)
+        
+        # 若當前為開盤時間，嘗試抓取 1m 資料補足今日即時點位
+        now = datetime.now()
+        if now.weekday() <= 4 and 9 <= now.hour <= 14:
+            today_df = stock.history(period="1d", interval="1m")
+            if not today_df.empty:
+                # 取得最新一筆 1m 資料作為今日日線更新
+                last_price = today_df['Close'].iloc[-1]
+                last_time = today_df.index[-1].replace(hour=0, minute=0, second=0, microsecond=0)
+                if last_time > df.index[-1]:
+                    new_row = pd.DataFrame({'Open': today_df['Open'].iloc[0], 'High': today_df['High'].max(), 
+                                            'Low': today_df['Low'].min(), 'Close': last_price, 
+                                            'Volume': today_df['Volume'].sum()}, index=[last_time])
+                    df = pd.concat([df, new_row])
+        return df
     except:
         return pd.DataFrame()
 
@@ -79,6 +96,7 @@ def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
     plt.style.use('dark_background')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
+    
     ma20 = df_slice['Close'].rolling(20).mean()
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
@@ -125,33 +143,14 @@ if os.path.exists('孔明看盤.png'):
         backdrop-filter: blur(6px); z-index: -1;
     }}
     [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; }}
-    
-    h1 {{ 
-        font-size: clamp(1.8rem, 6vw, 3rem) !important; 
-        color: #FFFFFF !important; 
-        text-shadow: 2px 2px 6px #000;
-        white-space: nowrap;
-        font-weight: 800 !important;
-    }}
-    
-    .stMarkdown, .stMetric, .stExpander {{ 
-        background-color: rgba(0, 0, 0, 0.5) !important; 
-        backdrop-filter: blur(10px); 
-        padding: 10px; border-radius: 8px; margin-bottom: 10px; 
-    }}
-
-    /* 修正焦點：象限分析說明字體與背景辨識度強化 */
+    h1 {{ font-size: clamp(1.8rem, 6vw, 3rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; white-space: nowrap; font-weight: 800 !important; }}
+    .stMarkdown, .stMetric, .stExpander {{ background-color: rgba(0, 0, 0, 0.5) !important; backdrop-filter: blur(10px); padding: 10px; border-radius: 8px; margin-bottom: 10px; }}
     .analysis-container {{
         background-color: rgba(0, 0, 0, 0.9) !important;
         backdrop-filter: blur(15px);
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        margin-bottom: 20px;
-        color: #FFFFFF !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.3);
+        margin-bottom: 20px; color: #FFFFFF !important; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
     }}
-    
     .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }}
     </style>
     """
@@ -237,15 +236,14 @@ if ticker:
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         
-        # 修正後的解析說明區塊
         st.markdown(f"""
         <div class="analysis-container">
-            <b style="color: #FF4B4B; font-size: 1.1rem;">📊 落點解析說明：</b><br>
-            <span style="font-size: 0.95rem;">
-            • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的處於多頭攻擊態勢。<br>
-            • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日走勢受壓。具備補漲潛力。<br>
-            • <b>左上 (過熱投機區)：</b> 今日漲幅高但 AI 評分低。留意短線回檔風險。<br>
-            • <b>左下 (弱勢觀望區)：</b> 評分與漲跌皆疲弱。建議持續觀察。
+            <b style="color: #FF4B4B; font-size: 1.15rem;">📊 落點解析說明：</b><br>
+            <span style="font-size: 1rem; line-height: 1.6;">
+            • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的多頭動能極強。<br>
+            • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日壓回。具備補漲潛力。<br>
+            • <b>左上 (過熱投機區)：</b> 評分低但今日漲幅大。留意短線回檔風險。<br>
+            • <b>左下 (弱勢觀望區)：</b> 評分與趨勢皆疲弱。標的目前處於冷灶期。
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -269,14 +267,10 @@ if ticker:
                 is_target = (q_df['T'].iloc[i] == ticker)
                 font_size = 18 if is_target else 9
                 color_val = 'white' if is_target else '#CCCCCC'
-                ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), 
-                            fontsize=font_size, xytext=(5,5), textcoords='offset points', 
-                            fontweight='bold', color=color_val)
+                ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), fontsize=font_size, xytext=(5,5), textcoords='offset points', fontweight='bold', color=color_val)
             
-            # 白色虛線指標線
             ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
             ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
-            
             ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
             fig_q.patch.set_alpha(0.0)
             
