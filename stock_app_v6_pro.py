@@ -33,18 +33,22 @@ STOCK_DB = load_stock_names()
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
 
-# 新增：快取基本面資訊，避免頻繁請求導致 RateLimitError
-@st.cache_data(ttl=3600) # 基本面資料一小時更新一次即可
-def get_stock_info(ticker):
+# 優化：先處理好顯示用的字串，避免 HTML 格式化錯誤
+@st.cache_data(ttl=3600)
+def get_stock_info_display(ticker):
     try:
         s = yf.Ticker(ticker)
         info = s.info
-        return {
-            "pe": info.get('trailingPE', 0),
-            "eps": info.get('trailingEps', 0)
-        }
+        pe = info.get('trailingPE')
+        eps = info.get('trailingEps')
+        
+        # 格式化為字串，若無資料則顯示 N/A
+        pe_display = f"{pe:.2f}" if pe is not None and isinstance(pe, (int, float)) else "N/A"
+        eps_display = f"{eps:.2f}" if eps is not None and isinstance(eps, (int, float)) else "N/A"
+        
+        return {"pe": pe_display, "eps": eps_display}
     except Exception:
-        return {"pe": 0, "eps": 0}
+        return {"pe": "N/A", "eps": "N/A"}
 
 # --- 3. 核心運算 ---
 @st.cache_data(ttl=60)
@@ -75,8 +79,8 @@ def calculate_rsi(df, periods=14):
     gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
     rs = gain / loss
-    if rs.empty or (1 + rs).iloc[-1] == 0: return 50
-    return 100 - (100 / (1 + rs))
+    if rs.empty or (1 + rs.iloc[-1]) == 0: return 50
+    return 100 - (100 / (1 + rs.iloc[-1]))
 
 def evaluate_stock_100(df):
     if df.empty or len(df) < 100: return 0, []
@@ -87,7 +91,7 @@ def evaluate_stock_100(df):
         m120 = df['Close'].rolling(120).mean()
         m1200 = df['Close'].rolling(1200, min_periods=100).mean()
         std20 = df['Close'].rolling(20).std()
-        rsi = calculate_rsi(df).iloc[-1]
+        rsi = calculate_rsi(df)
         vol = df['Volume'].iloc[-1]
         avg_vol = df['Volume'].tail(5).mean()
         
@@ -155,7 +159,7 @@ if os.path.exists('孔明看盤.png'):
         backdrop-filter: blur(6px); z-index: -1;
     }}
     [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; }}
-    h1 {{ font-size: clamp(1.8rem, 6vw, 3rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; white-space: nowrap; font-weight: 800 !important; }}
+    h1 {{ font-size: clamp(1.5rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; font-weight: 800 !important; }}
     .stMarkdown, .stMetric, .stExpander {{ background-color: rgba(0, 0, 0, 0.5) !important; backdrop-filter: blur(10px); padding: 10px; border-radius: 8px; margin-bottom: 10px; }}
     .analysis-container {{
         background-color: rgba(0, 0, 0, 0.9) !important;
@@ -204,8 +208,8 @@ if ticker:
     hist = fetch_stock_data(ticker, period="7y")
     
     if not hist.empty:
-        # 使用優化後的快取函數獲取 PE/EPS
-        info_data = get_stock_info(ticker)
+        # 使用優化後的字串快取函數
+        info_display = get_stock_info_display(ticker)
         
         c_name = get_company_name(ticker)
         score, tags = evaluate_stock_100(hist)
@@ -215,9 +219,6 @@ if ticker:
         prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
         pct = ((lp - prev_close)/prev_close)*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
-        
-        pe_val = info_data["pe"]
-        eps_val = info_data["eps"]
         
         twii = fetch_stock_data("^TWII", period="7y")
         if not twii.empty:
@@ -245,8 +246,8 @@ if ticker:
             st.markdown(f"""
             <div class='data-card'>
                 <span style='color: #AAA;'>基本面資訊</span><br>
-                <span style='color: white; font-size: 1.1rem;'>本益比 (PE)：<b>{pe_val:.2f if pe_val else "N/A"}</b></span><br>
-                <span style='color: white; font-size: 1.1rem;'>每股盈餘 (EPS)：<b>{eps_val:.2f if eps_val else "N/A"}</b></span><br>
+                <span style='color: white; font-size: 1.1rem;'>本益比 (PE)：<b>{info_display['pe']}</b></span><br>
+                <span style='color: white; font-size: 1.1rem;'>每股盈餘 (EPS)：<b>{info_display['eps']}</b></span><br>
                 <small style='color:#777;'>數據來源: Yahoo Finance</small>
             </div>
             """, unsafe_allow_html=True)
@@ -308,7 +309,7 @@ if ticker:
             fig_q.patch.set_alpha(0.0)
             st.pyplot(fig_q)
     else:
-        st.warning(f"⚠️ 暫時無法獲取數據（可能是 Yahoo 限流），請稍後再試或檢查代碼。")
+        st.warning(f"⚠️ 暫時無法獲取數據，請檢查代碼或稍後再試。")
 
 st.markdown("---")
 st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
