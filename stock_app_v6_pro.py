@@ -75,8 +75,6 @@ def evaluate_stock_100(df):
         std20 = df['Close'].rolling(20).std()
         rsi = calculate_rsi(df)
         vol = df['Volume'].iloc[-1]
-        
-        # 近期三週 (15天) 成交量考量
         recent_vol_avg = df['Volume'].tail(15).mean()
         six_month_vol_avg = df['Volume'].tail(120).mean()
         
@@ -103,11 +101,14 @@ def plot_v6_pro(df, title, days, resample_rule):
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
     
-    ax1.plot(df_slice.index, up, color='#AABBDD', alpha=0.5, lw=0.8, label='布林上軌')
-    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(MA20)')
-    ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.5, lw=0.8, label='布林下軌')
-    ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.12)
-    ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.75, label='收盤價', zorder=5)
+    # 布林通道顏色調淺 50%，寬度與原本設定一致
+    ax1.plot(df_slice.index, up, color='#AABBDD', alpha=0.25, lw=0.8, label='布林上軌')
+    ax1.plot(ax1.get_lines()[-1].get_xdata(), ma20, color='#FFA500', alpha=0.6, lw=1.2, ls='--', label='月線(MA20)')
+    ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.25, lw=0.8, label='布林下軌')
+    ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.06)
+    
+    # 收盤價線寬度調減 30% (約 1.2)
+    ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.2, label='收盤價', zorder=5)
     
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
     ax1.plot(df_slice.index, ma120, label='半年線', color='#FF3E3E', ls='--', lw=1.5)
@@ -125,6 +126,7 @@ def plot_v6_pro(df, title, days, resample_rule):
     return fig
 
 def plot_prediction_chart(df, ticker_name):
+    # 取最近 15 個交易日 (三週) 數據
     df_recent = df.tail(15).copy()
     y = df_recent['Close'].values
     X = np.column_stack([np.arange(len(y)), df_recent['Volume'].values])
@@ -142,17 +144,36 @@ def plot_prediction_chart(df, ticker_name):
     future_dates = [last_date + timedelta(days=i) for i in range(1, 6)]
     
     plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df_recent.index, ma20, color='#FFA500', ls='--', alpha=0.6, label='月線 (MA20)')
-    ax.plot(df_recent.index, up, color='#AABBDD', alpha=0.3, label='布林上軌')
-    ax.plot(df_recent.index, dn, color='#AABBDD', alpha=0.3, label='布林下軌')
+    fig, ax = plt.subplots(figsize=(11, 5))
+    
+    # 歷史趨勢與指標
+    ax.plot(df_recent.index, ma20, color='#FFA500', ls='--', alpha=0.4, label='月線 (MA20)')
+    ax.plot(df_recent.index, up, color='#AABBDD', alpha=0.2, label='布林上軌')
+    ax.plot(df_recent.index, dn, color='#AABBDD', alpha=0.2, label='布林下軌')
     ax.plot(df_recent.index, y, color='white', label='近期收盤', lw=1.5)
+    
+    # 預測趨勢
     ax.plot(future_dates, future_preds, color='#FF4B4B', linestyle=':', marker='o', markersize=6, label='AI 預測')
     
-    for d, p in zip(future_dates, future_preds):
-        ax.text(d, p, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va='bottom')
+    # --- 修正文字重疊邏輯 ---
+    # 計算 Y 軸範圍以利設定垂直間距比例
+    y_range = max(max(y), max(future_preds)) - min(min(y), min(future_preds))
+    offset = y_range * 0.05 if y_range > 0 else 2
     
-    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 量價預測 (含指標標註)", fontsize=12, color='white')
+    for i, (d, p) in enumerate(zip(future_dates, future_preds)):
+        # 採用上下交錯顯示，偶數索引在上方，奇數索引在下方
+        if i % 2 == 0:
+            va_val = 'bottom'
+            y_pos = p + (offset * 0.5)
+        else:
+            va_val = 'top'
+            y_pos = p - (offset * 0.5)
+            
+        ax.text(d, y_pos, f'{p:.1f}', color='#FF4B4B', fontsize=10, 
+                fontweight='bold', ha='center', va=va_val,
+                bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2'))
+    
+    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 量價預測 (上下交錯標註)", fontsize=12, color='white')
     ax.legend(loc='upper left', fontsize=8)
     ax.grid(True, alpha=0.1)
     fig.patch.set_alpha(0.0)
@@ -162,6 +183,7 @@ def plot_prediction_chart(df, ticker_name):
 # --- 4. 網頁 UI 佈局 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
+# CSS 強化手機排版與文字遮罩
 if os.path.exists('孔明看盤.png'):
     with open('孔明看盤.png', "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode()
@@ -176,9 +198,9 @@ if os.path.exists('孔明看盤.png'):
         background: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.6), rgba(0,0,0,0.85));
         backdrop-filter: blur(6px); z-index: -1;
     }}
-    h1 {{ font-size: clamp(1.5rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; font-weight: 800 !important; }}
+    h1 {{ font-size: clamp(1.4rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; font-weight: 800 !important; text-align: center; }}
     .analysis-container {{
-        background-color: rgba(0, 0, 0, 0.9) !important;
+        background-color: rgba(0, 0, 0, 0.85) !important;
         backdrop-filter: blur(15px); padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.3);
         margin-bottom: 20px; color: #FFFFFF !important;
     }}
@@ -190,23 +212,22 @@ else:
 
 st.markdown(bg_style, unsafe_allow_html=True)
 
-# 側欄隨機公司清單
+# 側欄
 st.sidebar.title("⌨️ 諸葛神算")
-query_in = st.sidebar.text_input("輸入代號 (如 2330)", "3675").upper()
+query_in = st.sidebar.text_input("輸入代號", "3675").upper()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🎲 隨機指標監控")
+st.sidebar.subheader("🎲 隨機指標監控 (10間)")
 
-@st.cache_data(ttl=600) # 每 10 分鐘更換一次隨機清單
+@st.cache_data(ttl=600)
 def get_random_watchlist():
-    potential_pool = [
+    pool = [
         "2330.TW", "2317.TW", "2454.TW", "2308.TW", "2382.TW", "2303.TW", "2881.TW", "2882.TW",
         "2412.TW", "2603.TW", "2609.TW", "2615.TW", "2357.TW", "3231.TW", "6669.TW", "2376.TW",
-        "1513.TW", "1519.TW", "1503.TW", "1514.TW", "2618.TW", "2610.TW", "2002.TW", "1301.TW",
-        "3675.TWO", "8046.TWO", "3529.TWO", "6488.TWO", "5483.TWO", "3105.TWO", "6182.TWO", "8069.TWO",
-        "0050.TW", "0056.TW", "00878.TW", "00919.TW", "00929.TW", "2324.TW", "2353.TW", "2327.TW"
+        "1513.TW", "1519.TW", "1503.TW", "1514.TW", "2618.TW", "2610.TW", "3675.TWO", "8046.TWO",
+        "3529.TWO", "6488.TWO", "5483.TWO", "0050.TW", "0056.TW", "00878.TW", "00919.TW", "00929.TW"
     ]
-    selected = random.sample(potential_pool, min(10, len(potential_pool)))
+    selected = random.sample(pool, 10)
     results = []
     for t in selected:
         d = fetch_stock_data(t, period="1y")
@@ -218,7 +239,6 @@ def get_random_watchlist():
 for name, code, sc in get_random_watchlist():
     st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
-# 主畫面
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
 ticker = query_in
@@ -249,11 +269,9 @@ if ticker:
         st.subheader("📍 潛力象限分析")
         st.markdown('<div class="analysis-container"><b>分析說明：</b>右上為強勢、右下為蓄勢、左上為過熱、左下為弱勢。</div>', unsafe_allow_html=True)
         
-        # 象限圖比較清單包含當前個股
-        compare_list = ["2330.TW", "2317.TW", "2454.TW", "0050.TW"]
-        if ticker not in compare_list: compare_list.append(ticker)
+        compare_list = ["2330.TW", "2317.TW", "2454.TW", "0050.TW", ticker]
         q_data = []
-        for t_item in compare_list:
+        for t_item in list(set(compare_list)):
             d_q = fetch_stock_data(t_item, period="1y")
             if not d_q.empty:
                 s_q, _ = evaluate_stock_100(d_q)
@@ -265,9 +283,13 @@ if ticker:
             fig_q, ax_q = plt.subplots(figsize=(10, 6))
             for i, row in q_df.iterrows():
                 is_target = (row['T'] == ticker)
+                # 象限圖內輸入的公司名稱字體放大 2 倍 (fontsize=18)
                 ax_q.scatter(row['S'], row['C'], c='#FF4B4B' if is_target else 'royalblue', s=250 if is_target else 150)
-                ax_q.annotate(row['N'], (row['S'], row['C']), color='white', fontsize=15 if is_target else 9, fontweight='bold', xytext=(5,5), textcoords='offset points')
-            ax_q.axvline(50, color='white', ls='--', alpha=0.4); ax_q.axhline(0, color='white', ls='--', alpha=0.4)
+                ax_q.annotate(row['N'], (row['S'], row['C']), color='white', 
+                              fontsize=18 if is_target else 9, 
+                              fontweight='bold', xytext=(5,5), textcoords='offset points')
+            ax_q.axvline(50, color='white', ls='--', alpha=0.5, lw=1.5) # 指標線明顯化
+            ax_q.axhline(0, color='white', ls='--', alpha=0.5, lw=1.5)
             fig_q.patch.set_alpha(0.0); st.pyplot(fig_q)
 
         st.markdown("---")
