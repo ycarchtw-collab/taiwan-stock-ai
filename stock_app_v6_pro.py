@@ -16,7 +16,7 @@ else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- 2. 名稱加載邏輯 ---
+# --- 2. 名稱與資訊快取邏輯 ---
 @st.cache_data
 def load_stock_names():
     names = {"2330.TW": "台積電", "2317.TW": "鴻海", "3675.TWO": "德微", "0050.TW": "元大台灣50"}
@@ -32,6 +32,19 @@ STOCK_DB = load_stock_names()
 
 def get_company_name(ticker):
     return STOCK_DB.get(ticker, ticker.split('.')[0])
+
+# 新增：快取基本面資訊，避免頻繁請求導致 RateLimitError
+@st.cache_data(ttl=3600) # 基本面資料一小時更新一次即可
+def get_stock_info(ticker):
+    try:
+        s = yf.Ticker(ticker)
+        info = s.info
+        return {
+            "pe": info.get('trailingPE', 0),
+            "eps": info.get('trailingEps', 0)
+        }
+    except Exception:
+        return {"pe": 0, "eps": 0}
 
 # --- 3. 核心運算 ---
 @st.cache_data(ttl=60)
@@ -62,6 +75,7 @@ def calculate_rsi(df, periods=14):
     gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
     rs = gain / loss
+    if rs.empty or (1 + rs).iloc[-1] == 0: return 50
     return 100 - (100 / (1 + rs))
 
 def evaluate_stock_100(df):
@@ -149,7 +163,7 @@ if os.path.exists('孔明看盤.png'):
         padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.3);
         margin-bottom: 20px; color: #FFFFFF !important; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
     }}
-    .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; min-height: 120px; }}
+    .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; min-height: 120px; }}
     </style>
     """
 else:
@@ -190,8 +204,8 @@ if ticker:
     hist = fetch_stock_data(ticker, period="7y")
     
     if not hist.empty:
-        stock_obj = yf.Ticker(ticker)
-        info = stock_obj.info
+        # 使用優化後的快取函數獲取 PE/EPS
+        info_data = get_stock_info(ticker)
         
         c_name = get_company_name(ticker)
         score, tags = evaluate_stock_100(hist)
@@ -202,9 +216,8 @@ if ticker:
         pct = ((lp - prev_close)/prev_close)*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
         
-        # 獲取本益比與 EPS
-        pe_val = info.get('trailingPE', 0)
-        eps_val = info.get('trailingEps', 0)
+        pe_val = info_data["pe"]
+        eps_val = info_data["eps"]
         
         twii = fetch_stock_data("^TWII", period="7y")
         if not twii.empty:
@@ -217,7 +230,6 @@ if ticker:
         
         st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
         
-        # 改為三欄佈局顯示 PE/EPS
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             st.markdown(f"""
@@ -233,8 +245,9 @@ if ticker:
             st.markdown(f"""
             <div class='data-card'>
                 <span style='color: #AAA;'>基本面資訊</span><br>
-                <span style='color: white; font-size: 1.1rem;'>本益比 (PE)：<b>{pe_val:.2f}</b></span><br>
-                <span style='color: white; font-size: 1.1rem;'>每股盈餘 (EPS)：<b>{eps_val:.2f}</b></span>
+                <span style='color: white; font-size: 1.1rem;'>本益比 (PE)：<b>{pe_val:.2f if pe_val else "N/A"}</b></span><br>
+                <span style='color: white; font-size: 1.1rem;'>每股盈餘 (EPS)：<b>{eps_val:.2f if eps_val else "N/A"}</b></span><br>
+                <small style='color:#777;'>數據來源: Yahoo Finance</small>
             </div>
             """, unsafe_allow_html=True)
 
@@ -262,7 +275,7 @@ if ticker:
             <span style="font-size: 1rem; line-height: 1.6;">
             • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的多頭動能極強。<br>
             • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日壓回。具備補漲潛力。<br>
-            • <b>左上 (過熱投機區)：</b> 評分低 but 今日漲幅大。留意短線回檔風險。<br>
+            • <b>左上 (過熱投機區)：</b> 評分低但今日漲幅大。留意短線回檔風險。<br>
             • <b>左下 (弱勢觀望區)：</b> 評分與趨勢皆疲弱。標的目前處於冷灶期。
             </span>
         </div>
@@ -295,7 +308,7 @@ if ticker:
             fig_q.patch.set_alpha(0.0)
             st.pyplot(fig_q)
     else:
-        st.warning(f"⚠️ 找不到代碼 {ticker} 的數據，請確認代號是否正確。")
+        st.warning(f"⚠️ 暫時無法獲取數據（可能是 Yahoo 限流），請稍後再試或檢查代碼。")
 
 st.markdown("---")
 st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
