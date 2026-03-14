@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import json
 import os
 import base64
+import random
 from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
 
@@ -39,7 +40,6 @@ def fetch_stock_data(ticker, period="7y"):
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval="1d", auto_adjust=True)
-        
         now = datetime.now()
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
@@ -72,7 +72,6 @@ def evaluate_stock_100(df):
         c = df['Close'].iloc[-1]
         m20 = df['Close'].rolling(20).mean()
         m120 = df['Close'].rolling(120).mean()
-        m1200 = df['Close'].rolling(1200, min_periods=100).mean()
         std20 = df['Close'].rolling(20).std()
         rsi = calculate_rsi(df)
         vol = df['Volume'].iloc[-1]
@@ -84,19 +83,17 @@ def evaluate_stock_100(df):
         tests = [
             (c > m20.iloc[-1], "股價站上月線"), 
             (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
-            (c > m120.iloc[-1] if not np.isnan(m120.iloc[-1]) else False, "股價站上半年線"),
+            (c > m120.iloc[-1], "股價站上半年線"),
             (50 < rsi < 75, "RSI 強勢攻擊區"), 
-            (recent_vol_avg > six_month_vol_avg, "三週均量優於半年均量"), # 新增三週量能考量
+            (recent_vol_avg > six_month_vol_avg, "三週均量優於半年均量"),
             (vol > recent_vol_avg * 1.2, "今日量能爆發"),
-            (c > m1200.iloc[-1] if not np.isnan(m1200.iloc[-1]) else True, "高於五年基期"),
             (c < m20.iloc[-1] + std20.iloc[-1]*2, "尚未觸及布林上軌"),
-            (c > np.sum(((df['High']+df['Low']+df['Close'])/3)*df['Volume'])/np.sum(df['Volume']), "站穩 VWAP 均價"),
             (c > df['Close'].iloc[-2], "維持連漲慣性")
         ]
         for cond, msg in tests:
-            if cond: score += 10; reasons.append(msg)
+            if cond: score += 12.5; reasons.append(msg)
     except: return 0, []
-    return score, reasons
+    return int(score), reasons
 
 def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
@@ -107,15 +104,13 @@ def plot_v6_pro(df, title, days, resample_rule):
     up, dn = ma20 + std20*2, ma20 - std20*2
     
     ax1.plot(df_slice.index, up, color='#AABBDD', alpha=0.5, lw=0.8, label='布林上軌')
-    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(中軸)')
+    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(MA20)')
     ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.5, lw=0.8, label='布林下軌')
     ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.12)
     ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.75, label='收盤價', zorder=5)
     
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
-    ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(len(df_slice))
     ax1.plot(df_slice.index, ma120, label='半年線', color='#FF3E3E', ls='--', lw=1.5)
-    ax1.plot(df_slice.index, ma1200, label='五年線', color='#00FF00', ls='-.', lw=1.5)
     
     ax1.set_ylim(df_slice['Low'].min()*0.96, df_slice['High'].max()*1.04)
     ax1.set_title(title, fontsize=14, fontweight='bold', color='#FFFFFF')
@@ -130,22 +125,15 @@ def plot_v6_pro(df, title, days, resample_rule):
     return fig
 
 def plot_prediction_chart(df, ticker_name):
-    # 取最近 15 個交易日 (三週) 的數據進行量價回歸預測
     df_recent = df.tail(15).copy()
     y = df_recent['Close'].values
-    
-    # 特徵：[時間索引, 成交量]
     X = np.column_stack([np.arange(len(y)), df_recent['Volume'].values])
+    model = LinearRegression().fit(X, y)
     
-    model = LinearRegression()
-    model.fit(X, y)
-    
-    # 預測未來 5 天，假設成交量維持近期均值
     avg_vol = df_recent['Volume'].mean()
     future_X = np.column_stack([np.arange(len(y), len(y) + 5), [avg_vol]*5])
     future_preds = model.predict(future_X)
     
-    # 計算指標
     ma20 = df['Close'].rolling(20).mean().tail(15)
     std20 = df['Close'].rolling(20).std().tail(15)
     up, dn = ma20 + std20*2, ma20 - std20*2
@@ -155,22 +143,16 @@ def plot_prediction_chart(df, ticker_name):
     
     plt.style.use('dark_background')
     fig, ax = plt.subplots(figsize=(10, 5))
-    
-    # 1. 繪製歷史指標
     ax.plot(df_recent.index, ma20, color='#FFA500', ls='--', alpha=0.6, label='月線 (MA20)')
     ax.plot(df_recent.index, up, color='#AABBDD', alpha=0.3, label='布林上軌')
     ax.plot(df_recent.index, dn, color='#AABBDD', alpha=0.3, label='布林下軌')
     ax.plot(df_recent.index, y, color='white', label='近期收盤', lw=1.5)
-    
-    # 2. 繪製預測點與數值標註
     ax.plot(future_dates, future_preds, color='#FF4B4B', linestyle=':', marker='o', markersize=6, label='AI 預測')
     
-    # 標註最後一天的預估價
-    for i, (d, p) in enumerate(zip(future_dates, future_preds)):
-        if i == 0 or i == 4: # 標註第一天跟最後一天
-            ax.text(d, p, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va='bottom')
+    for d, p in zip(future_dates, future_preds):
+        ax.text(d, p, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va='bottom')
     
-    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 量價預測 (含月線/布林指標)", fontsize=12, color='white')
+    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 量價預測 (含指標標註)", fontsize=12, color='white')
     ax.legend(loc='upper left', fontsize=8)
     ax.grid(True, alpha=0.1)
     fig.patch.set_alpha(0.0)
@@ -208,24 +190,35 @@ else:
 
 st.markdown(bg_style, unsafe_allow_html=True)
 
+# 側欄隨機公司清單
 st.sidebar.title("⌨️ 諸葛神算")
 query_in = st.sidebar.text_input("輸入代號 (如 2330)", "3675").upper()
 
 st.sidebar.markdown("---")
-@st.cache_data(ttl=3600)
-def scan_potential():
-    p_list = []
-    test_list = ["2330.TW", "2454.TW", "2317.TW", "3675.TWO", "1513.TW", "1519.TW"]
-    for t in test_list:
-        d = fetch_stock_data(t, period="7y")
+st.sidebar.subheader("🎲 隨機指標監控")
+
+@st.cache_data(ttl=600) # 每 10 分鐘更換一次隨機清單
+def get_random_watchlist():
+    potential_pool = [
+        "2330.TW", "2317.TW", "2454.TW", "2308.TW", "2382.TW", "2303.TW", "2881.TW", "2882.TW",
+        "2412.TW", "2603.TW", "2609.TW", "2615.TW", "2357.TW", "3231.TW", "6669.TW", "2376.TW",
+        "1513.TW", "1519.TW", "1503.TW", "1514.TW", "2618.TW", "2610.TW", "2002.TW", "1301.TW",
+        "3675.TWO", "8046.TWO", "3529.TWO", "6488.TWO", "5483.TWO", "3105.TWO", "6182.TWO", "8069.TWO",
+        "0050.TW", "0056.TW", "00878.TW", "00919.TW", "00929.TW", "2324.TW", "2353.TW", "2327.TW"
+    ]
+    selected = random.sample(potential_pool, min(10, len(potential_pool)))
+    results = []
+    for t in selected:
+        d = fetch_stock_data(t, period="1y")
         if not d.empty:
             s, _ = evaluate_stock_100(d)
-            p_list.append((get_company_name(t), t.split('.')[0], s))
-    return sorted(p_list, key=lambda x: x[2], reverse=True)[:10]
+            results.append((get_company_name(t), t.split('.')[0], s))
+    return sorted(results, key=lambda x: x[2], reverse=True)
 
-for name, code, sc in scan_potential():
+for name, code, sc in get_random_watchlist():
     st.sidebar.markdown(f'<div style="color:white; padding:8px; border-left:4px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{name} ({code})<br><span style="color:#ff4b4b">{sc}分</span></div>', unsafe_allow_html=True)
 
+# 主畫面
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
 ticker = query_in
@@ -233,119 +226,52 @@ if ticker:
     if not (ticker.endswith(".TW") or ticker.endswith(".TWO")):
         test_ticker = ticker + ".TW"
         hist_test = fetch_stock_data(test_ticker, period="1mo")
-        if hist_test.empty:
-            ticker = ticker + ".TWO"
-        else:
-            ticker = test_ticker
+        ticker = ticker + ".TWO" if hist_test.empty else test_ticker
 
     hist = fetch_stock_data(ticker, period="7y")
-    
     if not hist.empty:
         c_name = get_company_name(ticker)
         score, tags = evaluate_stock_100(hist)
-        last_date = hist.index[-1].strftime('%Y-%m-%d')
-        lp = hist['Close'].iloc[-1]
-        
-        prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
-        pct = ((lp - prev_close)/prev_close)*100
+        lp, last_date = hist['Close'].iloc[-1], hist.index[-1].strftime('%Y-%m-%d')
+        pct = ((lp - hist['Close'].iloc[-2])/hist['Close'].iloc[-2])*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
         
-        twii = fetch_stock_data("^TWII", period="7y")
-        if not twii.empty:
-            t_lp = twii['Close'].iloc[-1]
-            t_pp = twii['Close'].iloc[-2]
-            t_pct = ((t_lp - t_pp)/t_pp)*100
-            t_pct_color = "#FF4B4B" if t_pct >= 0 else "#00FF7F"
-        else:
-            t_lp, t_pct, t_pct_color = 0, 0, "white"
-        
         st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
-        
         col1, col2 = st.columns([1, 1])
         with col1:
-            st.markdown(f"""
-            <div class='data-card'>
-                <span style='color: #AAA;'>現價</span><br>
-                <span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span>
-                <span style='color:{pct_color}; font-size: 1.3rem; font-weight: bold;'>({pct:+.2f}%)</span><br>
-                <div style='color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; display:inline-block; border:1px solid #444; margin-top:10px;'>🔴 大盤: {t_lp:,.2f} <span style='color:{t_pct_color};'>({t_pct:+.2f}%)</span></div>
-            </div>
-            """, unsafe_allow_html=True)
-
+            st.markdown(f"<div class='data-card'><span style='color: #AAA;'>現價</span><br><span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> <span style='color:{pct_color}; font-size: 1.3rem;'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
         with col2:
-            score_color = "#FF4B4B" if score >= 50 else "#00FF7F"
-            st.markdown(f"""
-            <div class='data-card'>
-                <span style='color: #AAA;'>AI 評分</span><br>
-                <span style='font-size: 2.2rem; font-weight: bold; color: {score_color};'>{score} 分</span>
-            </div>
-            """, unsafe_allow_html=True)
-            with st.expander("🔍 決策依據"):
-                for t in tags: st.write(f"✅ {t}")
+            st.markdown(f"<div class='data-card'><span style='color: #AAA;'>AI 評分</span><br><span style='font-size: 2.2rem; font-weight: bold; color: {'#FF4B4B' if score>=50 else '#00FF7F'};'>{score} 分</span></div>", unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
-        st.markdown("---")
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
-
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】趨勢指標圖", 130, '3D'))
+        
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
-        st.markdown(f"""
-        <div class="analysis-container">
-            <b style="color: #FF4B4B; font-size: 1.15rem;">📊 落點解析說明：</b><br>
-            <span style="font-size: 1rem; line-height: 1.6;">
-            • <b>右上 (強勢攻擊區)：</b> AI 評分高且漲勢強。標的多頭動能極強。<br>
-            • <b>右下 (蓄勢待發區)：</b> AI 評分高但今日壓回。具備補漲潛力。<br>
-            • <b>左上 (過熱投機區)：</b> 評分低但今日漲幅大。留意短線回檔風險。<br>
-            • <b>左下 (弱勢觀望區)：</b> 評分與趨勢皆疲弱。標的目前處於冷灶期。
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # 象限圖
-        compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
-        if ticker not in compare: compare.append(ticker)
-        q_list = []
-        for t_item in compare:
-            d_q = fetch_stock_data(t_item, period="7y")
-            if d_q.empty: continue
-            s_q, _ = evaluate_stock_100(d_q)
-            c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
-            q_list.append({"T": t_item, "N": get_company_name(t_item), "S": s_q, "C": c_q})
+        st.markdown('<div class="analysis-container"><b>分析說明：</b>右上為強勢、右下為蓄勢、左上為過熱、左下為弱勢。</div>', unsafe_allow_html=True)
         
-        if q_list:
-            q_df = pd.DataFrame(q_list)
+        # 象限圖比較清單包含當前個股
+        compare_list = ["2330.TW", "2317.TW", "2454.TW", "0050.TW"]
+        if ticker not in compare_list: compare_list.append(ticker)
+        q_data = []
+        for t_item in compare_list:
+            d_q = fetch_stock_data(t_item, period="1y")
+            if not d_q.empty:
+                s_q, _ = evaluate_stock_100(d_q)
+                c_q = ((d_q['Close'].iloc[-1]-d_q['Close'].iloc[-2])/d_q['Close'].iloc[-2])*100
+                q_data.append({"N": get_company_name(t_item), "S": s_q, "C": c_q, "T": t_item})
+        
+        if q_data:
+            q_df = pd.DataFrame(q_data)
             fig_q, ax_q = plt.subplots(figsize=(10, 6))
-            colors = ['#FF4B4B' if r == ticker else 'royalblue' for r in q_df['T']]
-            ax_q.scatter(q_df['S'], q_df['C'], c=colors, s=250, edgecolors='white', zorder=5)
-            for i, txt in enumerate(q_df['N']):
-                is_target = (q_df['T'].iloc[i] == ticker)
-                font_size = 18 if is_target else 9
-                color_val = 'white' if is_target else '#CCCCCC'
-                ax_q.annotate(txt, (q_df['S'].iloc[i], q_df['C'].iloc[i]), fontsize=font_size, xytext=(5,5), textcoords='offset points', fontweight='bold', color=color_val)
-            
-            ax_q.axvline(50, color='white', ls='--', alpha=0.6, lw=1.2)
-            ax_q.axhline(0, color='white', ls='--', alpha=0.6, lw=1.2)
-            ax_q.set_xlabel("AI 評分 (分)", color='white'); ax_q.set_ylabel("漲跌幅 (%)", color='white')
-            fig_q.patch.set_alpha(0.0)
-            st.pyplot(fig_q)
+            for i, row in q_df.iterrows():
+                is_target = (row['T'] == ticker)
+                ax_q.scatter(row['S'], row['C'], c='#FF4B4B' if is_target else 'royalblue', s=250 if is_target else 150)
+                ax_q.annotate(row['N'], (row['S'], row['C']), color='white', fontsize=15 if is_target else 9, fontweight='bold', xytext=(5,5), textcoords='offset points')
+            ax_q.axvline(50, color='white', ls='--', alpha=0.4); ax_q.axhline(0, color='white', ls='--', alpha=0.4)
+            fig_q.patch.set_alpha(0.0); st.pyplot(fig_q)
 
-        # 未來一週走勢預測區（整合量價與指標）
         st.markdown("---")
-        st.subheader("🔮 AI 諸葛預測走勢 (量價指標模型)")
+        st.subheader("🔮 AI 諸葛量價預測")
         st.pyplot(plot_prediction_chart(hist, c_name))
-        
-        st.markdown(f"""
-        <div class="analysis-container">
-            <span style="font-size: 1rem; line-height: 1.6;">
-            <b>預測原理：</b>本圖採用最近三週成交量與股價之回歸模型，同步參考月線與布林通道位置。
-            虛線標註處為 AI 預估之目標價，僅供技術面參考。
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
     else:
-        st.warning(f"⚠️ 找不到代碼 {ticker} 的數據。")
-
-st.markdown("---")
-st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
+        st.warning("⚠️ 無法獲取數據。")
