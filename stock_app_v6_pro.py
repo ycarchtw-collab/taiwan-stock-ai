@@ -17,7 +17,7 @@ else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- 2. 核心數據函數 ---
+# --- 2. 核心數據處理函數 ---
 @st.cache_data
 def load_stock_names():
     names = {"2330.TW": "台積電", "2317.TW": "鴻海", "3675.TWO": "德微", "0050.TW": "元大台灣50"}
@@ -56,44 +56,50 @@ def fetch_stock_data(ticker, period="7y"):
     except:
         return pd.DataFrame()
 
+def calculate_rsi(df, periods=14):
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+    rs = gain / loss
+    if rs.empty or (1 + rs.iloc[-1]) == 0: return 50
+    return 100 - (100 / (1 + rs.iloc[-1]))
+
 def evaluate_stock_100(df):
-    if df.empty or len(df) < 100: return 0
-    score = 0
+    if df.empty or len(df) < 100: return 0, []
+    score, reasons = 0, []
     try:
         c = df['Close'].iloc[-1]
         m20 = df['Close'].rolling(20).mean().iloc[-1]
         m120 = df['Close'].rolling(120).mean().iloc[-1]
+        std20 = df['Close'].rolling(20).std().iloc[-1]
+        rsi = calculate_rsi(df)
         vol = df['Volume'].iloc[-1]
-        vol_avg = df['Volume'].tail(15).mean()
+        vol_avg = df['Volume'].tail(15).mean() # 近三週量能
         
-        # 評分權重設計
-        if c > m20: score += 20
-        if c > m120: score += 20
-        if vol > vol_avg: score += 20
-        if c > df['Close'].iloc[-2]: score += 15
-        if m20 > df['Close'].rolling(20).mean().iloc[-5]: score += 15
-        
-        # 隨機細節修正 (避免每次都整十數)
-        score += random.randint(0, 10)
-    except: return 0
-    return min(int(score), 100)
+        tests = [
+            (c > m20, "股價站上月線"), 
+            (m20 > df['Close'].rolling(20).mean().iloc[-5], "月線趨勢向上"),
+            (c > m120, "股價站上半年線"),
+            (50 < rsi < 75, "RSI 強勢攻擊區"), 
+            (vol > vol_avg, "量能優於三週均量"),
+            (c < m20 + std20*2, "尚未觸及布林上軌"),
+            (c > df['Close'].iloc[-2], "收盤價維持連漲慣性"),
+            (vol > df['Volume'].tail(120).mean(), "量能優於長線均值")
+        ]
+        for cond, msg in tests:
+            if cond: score += 12.5; reasons.append(msg)
+    except: return 0, []
+    return int(score), reasons
 
 def get_zhuge_advice(score):
-    """細分 6 個區間的評分差距說明"""
-    if score >= 90:
-        return "【赤壁火攻，勢不可擋】目前屬於極強勢格局，多頭氣勢如虹。白話說：這就是正在噴出的噴火龍。車上的請抱緊，空手者不宜強追，等量縮回踩月線才是好買點。"
-    elif 75 <= score < 90:
-        return "【萬事俱備，只欠東風】技術面已經全面翻多，均線多頭排列。價穩量縮是好預兆。投資者可觀察是否爆量突破近期高點，那是發動訊號。"
-    elif 60 <= score < 75:
-        return "【草船借箭，蓄勢待發】底部正在墊高，雖然還沒大漲，但主力明顯在偷偷吃貨。適合分批佈局，耐心等候雲開見月明。"
-    elif 40 <= score < 60:
-        return "【兩軍對壘，糾纏不清】股價在月線附近上下洗盤，沒量就沒方向。目前是「混水摸魚」盤，看戲就好，等明確站穩月線且出量再考慮。"
-    elif 20 <= score < 40:
-        return "【空城計現，外強中乾】看似有撐其實弱勢，每次反彈都是逃命波。切莫因為跌深就手癢進場，目前底在哪還不知道，保命要緊。"
-    else:
-        return "【火燒連環船，兵敗如山倒】趨勢完全走空，下方無支撐。這時候進去攤平只會越攤越平。白話建議：先撤退保資金，等大盤回穩再來。"
+    if score >= 90: return "【赤壁火攻，勢不可擋】目前屬於極強勢格局，噴火龍正在噴火。車上的請抱緊，空手者不宜強追，等量縮回踩月線才是好買點。"
+    elif 75 <= score < 90: return "【萬事俱備，只欠東風】技術面全面翻多。均線排列整齊，價穩量縮是好預兆。觀察是否爆量突破近期高點，那是再度發動訊號。"
+    elif 60 <= score < 75: return "【草船借箭，蓄勢待發】底部正在墊高，量能暗湧。主力明顯在偷偷吃貨。適合分批佈局，耐心等候雲開見月明。"
+    elif 40 <= score < 60: return "【兩軍對壘，糾纏不清】股價在月線附近上下洗盤，沒量就沒方向。目前是「混水摸魚」盤，看戲就好，等明確出量表態再說。"
+    elif 20 <= score < 40: return "【空城計現，外強中乾】看似有撐其實極弱，每次反彈都是逃命波。切莫因為跌深就手癢，底在哪還不知道，保命要緊。"
+    else: return "【火燒連環船，兵敗如山倒】趨勢完全走空，下方無支撐。這時候進去攤平只會越攤越平。建議先撤退保資金，等大盤回穩。"
 
-# --- 3. 圖表繪製函數 ---
+# --- 3. 圖表模組 ---
 def plot_v6_pro(df, title, days, show_ma1200=False):
     df_slice = df.tail(days).copy()
     plt.style.use('dark_background')
@@ -128,6 +134,7 @@ def plot_prediction_chart(df, ticker_name):
     y = df_recent['Close'].values
     X = np.column_stack([np.arange(len(y)), df_recent['Volume'].values])
     model = LinearRegression().fit(X, y)
+    
     future_X = np.column_stack([np.arange(len(y), len(y) + 5), [df_recent['Volume'].mean()]*5])
     preds = model.predict(future_X)
     future_dates = [df_recent.index[-1] + timedelta(days=i) for i in range(1, 6)]
@@ -140,8 +147,10 @@ def plot_prediction_chart(df, ticker_name):
     offset = y_range * 0.05 if y_range > 0 else 1
     for i, (d, p) in enumerate(zip(future_dates, preds)):
         va, y_pos = ('bottom', p + offset) if i % 2 == 0 else ('top', p - offset)
-        ax.text(d, y_pos, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va=va)
+        ax.text(d, y_pos, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va=va,
+                bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2'))
         
+    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 預測走勢", color='white')
     ax.legend(fontsize=8); ax.grid(True, alpha=0.1)
     fig.patch.set_alpha(0.0); plt.tight_layout()
     return fig
@@ -149,7 +158,6 @@ def plot_prediction_chart(df, ticker_name):
 # --- 4. 網頁 UI & 背景配置 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-# 背景圖 CSS (關鍵修復)
 if os.path.exists('孔明看盤.png'):
     with open('孔明看盤.png', "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
@@ -184,7 +192,9 @@ def get_random_watchlist():
     res = []
     for t in selected:
         d = fetch_stock_data(t, period="1y")
-        if not d.empty: res.append((get_company_name(t), t.split('.')[0], evaluate_stock_100(d)))
+        if not d.empty: 
+            s, _ = evaluate_stock_100(d)
+            res.append((get_company_name(t), t.split('.')[0], s))
     return sorted(res, key=lambda x: x[2], reverse=True)
 
 st.sidebar.markdown("---")
@@ -204,14 +214,19 @@ if ticker:
     hist = fetch_stock_data(ticker, period="7y")
     if not hist.empty:
         c_name = get_company_name(ticker)
-        score = evaluate_stock_100(hist)
+        score, tags = evaluate_stock_100(hist)
         lp = hist['Close'].iloc[-1]
         pct = ((lp - hist['Close'].iloc[-2])/hist['Close'].iloc[-2])*100
         
         st.markdown(f"#### 📋 {ticker} - {c_name}")
         c1, c2 = st.columns(2)
         c1.markdown(f"<div class='data-card'>現價<br><span style='font-size:2rem; font-weight:bold;'>{lp:,.2f}</span> ({pct:+.2f}%)</div>", unsafe_allow_html=True)
-        c2.markdown(f"<div class='data-card'>AI 評分<br><span style='font-size:2rem; font-weight:bold; color:#FF4B4B;'>{score}分</span></div>", unsafe_allow_html=True)
+        
+        # 修正：補回評分顯示與決策依據下拉選單
+        with c2:
+            st.markdown(f"<div class='data-card'>AI 評分<br><span style='font-size:2rem; font-weight:bold; color:#FF4B4B;'>{score}分</span></div>", unsafe_allow_html=True)
+            with st.expander("🔍 決策依據"):
+                for t in tags: st.write(f"✅ {t}")
         
         st.markdown(f'<div class="zhuge-advice"><b style="color:#FF4B4B; font-size:1.3rem;">📜 諸葛評語：</b><br>{get_zhuge_advice(score)}</div>', unsafe_allow_html=True)
 
@@ -225,6 +240,5 @@ if ticker:
     else:
         st.warning("查無數據")
 
-# 投資建議免責警語
 st.markdown("---")
 st.markdown("<div class='footer-text'>投資一定有風險，台股投資有賺有賠，申購前應詳閱公開說明書。本系統僅供技術研究參考，不構成任何投資建議。</div>", unsafe_allow_html=True)
