@@ -75,17 +75,16 @@ def evaluate_stock_100(df):
         rsi = calculate_rsi(df)
         vol = df['Volume'].iloc[-1]
         recent_vol_avg = df['Volume'].tail(15).mean()
-        six_month_vol_avg = df['Volume'].tail(120).mean()
         
         tests = [
             (c > m20.iloc[-1], "股價站上月線"), 
             (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
             (c > m120.iloc[-1], "股價站上半年線"),
             (50 < rsi < 75, "RSI 強勢攻擊區"), 
-            (recent_vol_avg > six_month_vol_avg, "三週均量增溫"),
+            (recent_vol_avg > df['Volume'].tail(120).mean(), "三週均量增溫"),
             (vol > recent_vol_avg * 1.1, "今日量能放大"),
             (c < m20.iloc[-1] + std20.iloc[-1]*2, "尚未觸及布林上軌"),
-            (c > df['Close'].iloc[-2], "收盤價連漲慣性")
+            (c > df['Close'].iloc[-2], "收盤價維持連漲")
         ]
         for cond, msg in tests:
             if cond: score += 12.5; reasons.append(msg)
@@ -93,28 +92,16 @@ def evaluate_stock_100(df):
     return int(score), reasons
 
 def get_zhuge_advice(score, df):
-    """生成諸葛白話建議"""
-    c = df['Close'].iloc[-1]
-    m20 = df['Close'].rolling(20).mean().iloc[-1]
-    vol_recent = df['Volume'].tail(15).mean()
-    vol_today = df['Volume'].iloc[-1]
-    
     if score >= 80:
-        advice = "【萬事俱備，只欠東風】目前格局極佳，價量配合完美。若是已經在車上的朋友，建議扶好坐穩，讓獲利持續奔跑；若是想進場，可待量縮拉回不破月線時伺機切入。"
+        return "【萬事俱備，只欠東風】目前格局極佳，價量配合完美。若是車上客，扶好坐穩讓獲利奔跑；若想進場，可待量縮拉回月線時切入。"
     elif 60 <= score < 80:
-        advice = "【草船借箭，順勢而為】股價正處於蓄勢期，雖然還沒到大爆發，但量能已經在偷偷增溫。這種盤急不得，適合分批佈局，耐心等候多頭表態。"
+        return "【草船借箭，順勢而為】股價處於蓄勢期，量能偷偷增溫。適合分批佈局，耐心等候多頭表態。"
     elif 40 <= score < 60:
-        advice = "【兩軍對壘，觀望為宜】目前多空交戰激烈，股價就在月線附近糾纏。量能忽大忽小，沒有明顯方向感。建議先看戲，等這幾天大盤穩一點或是個股爆量突圍再動手。"
+        return "【兩軍對壘，觀望為宜】目前多空交戰激烈，股價在月線糾纏，無明顯方向。建議先看戲，等爆量突圍再動手。"
     elif 20 <= score < 40:
-        advice = "【空城計現，謹防圈套】雖然看似跌深，但反彈無力且沒成交量。這時候進去很容易變成幫人墊背。建議先保住資金，等底部信號明確、月線走平後再說。"
+        return "【空城計現，謹防圈套】雖似跌深但反彈無力且無量。此時進場易幫人墊背，先保資金，等底部信號明確。"
     else:
-        advice = "【火燒連環船，先撤為快】各項技術指標都在警示，走勢疲軟且有量縮下跌的跡象。目前不是攤平的好時機，若手中有持股應注意風險控制，切莫逆勢而行。"
-    
-    # 加入關於成交量的白話提醒
-    if vol_today > vol_recent * 1.5:
-        advice += " 另外，今日爆出大量，這可能是主力換手或是表態信號，要特別留意明日能否守住今日低點。"
-    
-    return advice
+        return "【火燒連環船，先撤為快】技術指標全面警示，走勢疲軟且量縮下跌。非攤平時機，應控管風險，莫逆勢而行。"
 
 def plot_v6_pro(df, title, days, resample_rule):
     df_slice = df.tail(days).copy()
@@ -130,8 +117,13 @@ def plot_v6_pro(df, title, days, resample_rule):
     ax1.fill_between(df_slice.index, up, dn, color='#AABBDD', alpha=0.06)
     ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.2, label='收盤價', zorder=5)
     
+    # 加入半年線與五年線 (MA1200)
     ma120 = df['Close'].rolling(120).mean().tail(len(df_slice))
     ax1.plot(df_slice.index, ma120, label='半年線', color='#FF3E3E', ls='--', lw=1.5)
+    
+    if days > 1000: # 只有長線圖才顯示五年線
+        ma1200 = df['Close'].rolling(1200, min_periods=100).mean().tail(len(df_slice))
+        ax1.plot(df_slice.index, ma1200, label='五年線', color='#00FF00', ls='-.', lw=1.8)
     
     ax1.set_ylim(df_slice['Low'].min()*0.96, df_slice['High'].max()*1.04)
     ax1.set_title(title, fontsize=14, fontweight='bold', color='#FFFFFF')
@@ -158,7 +150,6 @@ def plot_prediction_chart(df, ticker_name):
     ma20 = df['Close'].rolling(20).mean().tail(15)
     std20 = df['Close'].rolling(20).std().tail(15)
     up, dn = ma20 + std20*2, ma20 - std20*2
-    
     last_date = df_recent.index[-1]
     future_dates = [last_date + timedelta(days=i) for i in range(1, 6)]
     
@@ -187,32 +178,19 @@ def plot_prediction_chart(df, ticker_name):
 # --- 4. 網頁 UI 佈局 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-if os.path.exists('孔明看盤.png'):
-    with open('孔明看盤.png', "rb") as image_file:
-        encoded_string = base64.b64encode(image_file.read()).decode()
-    bg_style = f"""
-    <style>
-    [data-testid="stAppViewContainer"] {{
-        background-image: url("data:image/png;base64,{encoded_string}");
-        background-size: cover; background-position: center; background-attachment: fixed;
-    }}
-    [data-testid="stAppViewContainer"]::before {{
-        content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        background: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.6), rgba(0,0,0,0.85));
-        backdrop-filter: blur(6px); z-index: -1;
-    }}
-    h1 {{ font-size: clamp(1.4rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; font-weight: 800 !important; text-align: center; }}
-    .analysis-container {{
-        background-color: rgba(0, 0, 0, 0.9) !important;
-        backdrop-filter: blur(15px); padding: 20px; border-radius: 12px; border: 1px solid #FF4B4B;
-        margin-bottom: 20px; color: #FFFFFF !important; line-height: 1.6;
-    }}
-    .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }}
-    </style>
-    """
-else:
-    bg_style = "<style>[data-testid='stAppViewContainer'] { background-color: #121212; }</style>"
-
+# CSS 文字遮罩與排版
+bg_style = """
+<style>
+[data-testid="stAppViewContainer"] { background-color: #121212; }
+h1 { font-size: clamp(1.4rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; text-align: center; }
+.analysis-container {
+    background-color: rgba(0, 0, 0, 0.9) !important;
+    backdrop-filter: blur(15px); padding: 20px; border-radius: 12px; border: 1px solid #FF4B4B;
+    margin-bottom: 20px; color: #FFFFFF !important; line-height: 1.6;
+}
+.data-card { background-color: rgba(30, 30, 30, 0.8); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }
+</style>
+"""
 st.markdown(bg_style, unsafe_allow_html=True)
 
 st.sidebar.title("⌨️ 諸葛神算")
@@ -222,7 +200,7 @@ st.sidebar.subheader("🎲 隨機指標監控")
 
 @st.cache_data(ttl=600)
 def get_random_watchlist():
-    pool = ["2330.TW", "2317.TW", "2454.TW", "2308.TW", "2382.TW", "2303.TW", "2881.TW", "2603.TW", "3675.TWO", "0050.TW", "2327.TW", "3231.TW", "2618.TW", "1513.TW"]
+    pool = ["2330.TW", "2317.TW", "2454.TW", "2308.TW", "2382.TW", "2303.TW", "2881.TW", "2603.TW", "3675.TWO", "0050.TW"]
     selected = random.sample(pool, min(10, len(pool)))
     results = []
     for t in selected:
@@ -247,7 +225,7 @@ if ticker:
     hist = fetch_stock_data(ticker, period="7y")
     if not hist.empty:
         c_name = get_company_name(ticker)
-        score, tags = evaluate_stock_100(hist)
+        score, _ = evaluate_stock_100(hist)
         lp, last_date = hist['Close'].iloc[-1], hist.index[-1].strftime('%Y-%m-%d')
         pct = ((lp - hist['Close'].iloc[-2])/hist['Close'].iloc[-2])*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
@@ -255,19 +233,16 @@ if ticker:
         st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
         col1, col2 = st.columns([1, 1])
         with col1:
-            st.markdown(f"<div class='data-card'><span style='color: #AAA;'>現價</span><br><span style='font-size: 2.2rem; font-weight: bold; color: white;'>{lp:,.2f}</span> <span style='color:{pct_color}; font-size: 1.3rem;'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='data-card'><span style='color: #AAA;'>現價</span><br><span style='font-size: 2.2rem; font-weight: bold;'>{lp:,.2f}</span> <span style='color:{pct_color};'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
         with col2:
             st.markdown(f"<div class='data-card'><span style='color: #AAA;'>AI 評分</span><br><span style='font-size: 2.2rem; font-weight: bold; color: {'#FF4B4B' if score>=50 else '#00FF7F'};'>{score} 分</span></div>", unsafe_allow_html=True)
 
-        # 諸葛神算白話建議區
-        st.markdown(f"""
-        <div class="analysis-container">
-            <b style="color: #FF4B4B; font-size: 1.2rem;">📜 諸葛分析建議：</b><br>
-            {get_zhuge_advice(score, hist)}
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="analysis-container"><b style="color:#FF4B4B;">📜 諸葛建議：</b><br>{get_zhuge_advice(score, hist)}</div>', unsafe_allow_html=True)
 
-        st.pyplot(plot_v6_pro(hist, f"【{c_name}】趨勢指標圖", 130, '3D'))
+        # 趨勢圖與五年線走勢圖
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】半年波段指標圖", 130, '3D'))
+        st.markdown("---")
+        st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年長線走勢圖", 1250, 'W')) # 此處會顯示 MA1200
         
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
@@ -287,8 +262,7 @@ if ticker:
                 is_target = (row['T'] == ticker)
                 ax_q.scatter(row['S'], row['C'], c='#FF4B4B' if is_target else 'royalblue', s=250 if is_target else 150)
                 ax_q.annotate(row['N'], (row['S'], row['C']), color='white', fontsize=18 if is_target else 9, fontweight='bold', xytext=(5,5), textcoords='offset points')
-            ax_q.axvline(50, color='white', ls='--', alpha=0.5, lw=1.5)
-            ax_q.axhline(0, color='white', ls='--', alpha=0.5, lw=1.5)
+            ax_q.axvline(50, color='white', ls='--', alpha=0.5, lw=1.5); ax_q.axhline(0, color='white', ls='--', alpha=0.5, lw=1.5)
             fig_q.patch.set_alpha(0.0); st.pyplot(fig_q)
 
         st.markdown("---")
