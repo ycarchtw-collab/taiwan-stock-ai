@@ -41,7 +41,6 @@ def fetch_stock_data(ticker, period="7y"):
         df = stock.history(period=period, interval="1d", auto_adjust=True)
         
         now = datetime.now()
-        # 開盤時段抓取 1m 資料補足今日即時數據
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
             if not today_df.empty:
@@ -77,13 +76,18 @@ def evaluate_stock_100(df):
         std20 = df['Close'].rolling(20).std()
         rsi = calculate_rsi(df)
         vol = df['Volume'].iloc[-1]
-        avg_vol = df['Volume'].tail(5).mean()
+        
+        # 近期三週 (15天) 成交量考量
+        recent_vol_avg = df['Volume'].tail(15).mean()
+        six_month_vol_avg = df['Volume'].tail(120).mean()
         
         tests = [
-            (c > m20.iloc[-1], "股價站上月線"), (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
+            (c > m20.iloc[-1], "股價站上月線"), 
+            (m20.iloc[-1] > m20.iloc[-5] if len(m20)>5 else False, "月線趨勢向上"),
             (c > m120.iloc[-1] if not np.isnan(m120.iloc[-1]) else False, "股價站上半年線"),
-            (m120.iloc[-1] > m120.iloc[-5] if not np.isnan(m120.iloc[-1]) else False, "長線趨勢翻正"),
-            (50 < rsi < 75, "RSI 強勢攻擊區"), (vol > avg_vol * 1.5, "量能顯著放大"),
+            (50 < rsi < 75, "RSI 強勢攻擊區"), 
+            (recent_vol_avg > six_month_vol_avg, "三週均量優於半年均量"), # 新增三週量能考量
+            (vol > recent_vol_avg * 1.2, "今日量能爆發"),
             (c > m1200.iloc[-1] if not np.isnan(m1200.iloc[-1]) else True, "高於五年基期"),
             (c < m20.iloc[-1] + std20.iloc[-1]*2, "尚未觸及布林上軌"),
             (c > np.sum(((df['High']+df['Low']+df['Close'])/3)*df['Volume'])/np.sum(df['Volume']), "站穩 VWAP 均價"),
@@ -102,7 +106,6 @@ def plot_v6_pro(df, title, days, resample_rule):
     std20 = df_slice['Close'].rolling(20).std()
     up, dn = ma20 + std20*2, ma20 - std20*2
     
-    # 布林通道與均線
     ax1.plot(df_slice.index, up, color='#AABBDD', alpha=0.5, lw=0.8, label='布林上軌')
     ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.7, lw=1.2, ls='--', label='月線(中軸)')
     ax1.plot(df_slice.index, dn, color='#AABBDD', alpha=0.5, lw=0.8, label='布林下軌')
@@ -119,7 +122,6 @@ def plot_v6_pro(df, title, days, resample_rule):
     ax1.legend(loc='best', fontsize=9, facecolor='#111', edgecolor='#444')
     ax1.grid(True, alpha=0.1)
     
-    # 量能圖
     df_res = df_slice.resample(resample_rule).agg({'Open':'first', 'Close':'last', 'Volume':'sum'})
     colors = ['#FF4B4B' if df_res['Close'].iloc[i] >= df_res['Open'].iloc[i] else '#00E676' for i in range(len(df_res))]
     ax2.bar(df_res.index, df_res['Volume'], color=colors, width=(2.5 if resample_rule=='3D' else 5), alpha=0.8)
@@ -128,29 +130,48 @@ def plot_v6_pro(df, title, days, resample_rule):
     return fig
 
 def plot_prediction_chart(df, ticker_name):
-    # 準備最近 20 天的數據進行線性回歸預測
-    df_recent = df.tail(20).copy()
+    # 取最近 15 個交易日 (三週) 的數據進行量價回歸預測
+    df_recent = df.tail(15).copy()
     y = df_recent['Close'].values
-    X = np.arange(len(y)).reshape(-1, 1)
+    
+    # 特徵：[時間索引, 成交量]
+    X = np.column_stack([np.arange(len(y)), df_recent['Volume'].values])
     
     model = LinearRegression()
     model.fit(X, y)
     
-    # 預測未來 5 個交易日
-    future_indices = np.arange(len(y), len(y) + 5).reshape(-1, 1)
-    future_preds = model.predict(future_indices)
+    # 預測未來 5 天，假設成交量維持近期均值
+    avg_vol = df_recent['Volume'].mean()
+    future_X = np.column_stack([np.arange(len(y), len(y) + 5), [avg_vol]*5])
+    future_preds = model.predict(future_X)
+    
+    # 計算指標
+    ma20 = df['Close'].rolling(20).mean().tail(15)
+    std20 = df['Close'].rolling(20).std().tail(15)
+    up, dn = ma20 + std20*2, ma20 - std20*2
     
     last_date = df_recent.index[-1]
     future_dates = [last_date + timedelta(days=i) for i in range(1, 6)]
     
     plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(10, 5))
     
-    ax.plot(df_recent.index, y, color='white', label='近期收盤走勢', lw=2)
-    ax.plot(future_dates, future_preds, color='#FF4B4B', linestyle='--', marker='o', label='AI 預測未來一週')
+    # 1. 繪製歷史指標
+    ax.plot(df_recent.index, ma20, color='#FFA500', ls='--', alpha=0.6, label='月線 (MA20)')
+    ax.plot(df_recent.index, up, color='#AABBDD', alpha=0.3, label='布林上軌')
+    ax.plot(df_recent.index, dn, color='#AABBDD', alpha=0.3, label='布林下軌')
+    ax.plot(df_recent.index, y, color='white', label='近期收盤', lw=1.5)
     
-    ax.set_title(f"🔮 {ticker_name} 未來一週 AI 走勢預估", fontsize=12, color='white', fontweight='bold')
-    ax.legend(loc='upper left', fontsize=9)
+    # 2. 繪製預測點與數值標註
+    ax.plot(future_dates, future_preds, color='#FF4B4B', linestyle=':', marker='o', markersize=6, label='AI 預測')
+    
+    # 標註最後一天的預估價
+    for i, (d, p) in enumerate(zip(future_dates, future_preds)):
+        if i == 0 or i == 4: # 標註第一天跟最後一天
+            ax.text(d, p, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va='bottom')
+    
+    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 量價預測 (含月線/布林指標)", fontsize=12, color='white')
+    ax.legend(loc='upper left', fontsize=8)
     ax.grid(True, alpha=0.1)
     fig.patch.set_alpha(0.0)
     plt.tight_layout()
@@ -159,7 +180,6 @@ def plot_prediction_chart(df, ticker_name):
 # --- 4. 網頁 UI 佈局 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-# 背景設定
 if os.path.exists('孔明看盤.png'):
     with open('孔明看盤.png', "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode()
@@ -174,13 +194,11 @@ if os.path.exists('孔明看盤.png'):
         background: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.6), rgba(0,0,0,0.85));
         backdrop-filter: blur(6px); z-index: -1;
     }}
-    [data-testid="stSidebar"] {{ background-color: rgba(20, 20, 20, 0.95) !important; }}
     h1 {{ font-size: clamp(1.5rem, 5vw, 2.5rem) !important; color: #FFFFFF !important; text-shadow: 2px 2px 6px #000; font-weight: 800 !important; }}
     .analysis-container {{
         background-color: rgba(0, 0, 0, 0.9) !important;
-        backdrop-filter: blur(15px);
-        padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.3);
-        margin-bottom: 20px; color: #FFFFFF !important; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+        backdrop-filter: blur(15px); padding: 18px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.3);
+        margin-bottom: 20px; color: #FFFFFF !important;
     }}
     .data-card {{ background-color: rgba(0, 0, 0, 0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; }}
     </style>
@@ -190,7 +208,6 @@ else:
 
 st.markdown(bg_style, unsafe_allow_html=True)
 
-# 側欄
 st.sidebar.title("⌨️ 諸葛神算")
 query_in = st.sidebar.text_input("輸入代號 (如 2330)", "3675").upper()
 
@@ -211,10 +228,8 @@ for name, code, sc in scan_potential():
 
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
-# 主邏輯
 ticker = query_in
 if ticker:
-    # 代號補完邏輯
     if not (ticker.endswith(".TW") or ticker.endswith(".TWO")):
         test_ticker = ticker + ".TW"
         hist_test = fetch_stock_data(test_ticker, period="1mo")
@@ -231,12 +246,10 @@ if ticker:
         last_date = hist.index[-1].strftime('%Y-%m-%d')
         lp = hist['Close'].iloc[-1]
         
-        # 漲跌計算
         prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else lp
         pct = ((lp - prev_close)/prev_close)*100
         pct_color = "#FF4B4B" if pct >= 0 else "#00FF7F"
         
-        # 大盤資料
         twii = fetch_stock_data("^TWII", period="7y")
         if not twii.empty:
             t_lp = twii['Close'].iloc[-1]
@@ -248,7 +261,6 @@ if ticker:
         
         st.markdown(f"#### 📋 {ticker} - {c_name} | {last_date}")
         
-        # 資訊看板（改為二欄）
         col1, col2 = st.columns([1, 1])
         with col1:
             st.markdown(f"""
@@ -276,7 +288,6 @@ if ticker:
         st.markdown("---")
         st.pyplot(plot_v6_pro(hist, f"【{c_name}】五年波段指標圖", 1250, 'W'))
 
-        # 象限分析區
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         st.markdown(f"""
@@ -291,6 +302,7 @@ if ticker:
         </div>
         """, unsafe_allow_html=True)
 
+        # 象限圖
         compare = ["2330.TW", "2317.TW", "3675.TWO", "6282.TW", "0050.TW"]
         if ticker not in compare: compare.append(ticker)
         q_list = []
@@ -318,29 +330,22 @@ if ticker:
             fig_q.patch.set_alpha(0.0)
             st.pyplot(fig_q)
 
-        # 未來一週走勢預測區
+        # 未來一週走勢預測區（整合量價與指標）
         st.markdown("---")
-        st.subheader("🔮 AI 諸葛預測走勢")
-        pred_desc = "根據目前動能指標與線性回歸模型，"
-        if score >= 70:
-            pred_desc += f"【{c_name}】目前處於強勢攻擊形態，預測走勢將維持向上慣性。"
-        elif score <= 40:
-            pred_desc += f"【{c_name}】技術指標較為疲弱，短期內預計將持續面臨壓力或區間盤整。"
-        else:
-            pred_desc += f"【{c_name}】目前處於多空交戰區，預測將在目前價位附近進行橫盤整理。"
-
+        st.subheader("🔮 AI 諸葛預測走勢 (量價指標模型)")
+        st.pyplot(plot_prediction_chart(hist, c_name))
+        
         st.markdown(f"""
         <div class="analysis-container">
             <span style="font-size: 1rem; line-height: 1.6;">
-            {pred_desc}
+            <b>預測原理：</b>本圖採用最近三週成交量與股價之回歸模型，同步參考月線與布林通道位置。
+            虛線標註處為 AI 預估之目標價，僅供技術面參考。
             </span>
         </div>
         """, unsafe_allow_html=True)
-        
-        st.pyplot(plot_prediction_chart(hist, c_name))
 
     else:
-        st.warning(f"⚠️ 找不到代碼 {ticker} 的數據，請確認代號是否正確。")
+        st.warning(f"⚠️ 找不到代碼 {ticker} 的數據。")
 
 st.markdown("---")
 st.markdown("<p style='color:#FF9999; font-size: 0.8em; text-align: center; font-weight: bold;'>投資一定有風險，投資有賺有賠，申購前應詳閱公開說明書</p>", unsafe_allow_html=True)
