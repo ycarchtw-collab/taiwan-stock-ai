@@ -10,14 +10,14 @@ import random
 from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
 
-# --- 1. 雲端環境與字體設定 (維持原始設定) ---
+# --- 1. 雲端環境與字體設定 (維持原始) ---
 if os.name == 'posix':
     plt.rcParams['font.sans-serif'] = ['Noto Sans CJK JP', 'Noto Sans CJK TC', 'Liberation Sans']
 else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- 2. 核心數據處理函數 (維持原始邏輯) ---
+# --- 2. 核心數據處理函數 (維持原始) ---
 @st.cache_data
 def load_stock_names():
     names = {"2330.TW": "台積電", "2317.TW": "鴻海", "3675.TWO": "德微", "0050.TW": "元大台灣50"}
@@ -81,15 +81,7 @@ def evaluate_stock_100(df):
     except: return 0, []
     return min(int(score), 100), reasons
 
-def get_zhuge_advice(score):
-    if score >= 90: return "【赤壁火攻，勢不可擋】極強勢格局。噴火龍正在噴火，持股者抱緊，空手者等量縮回踩再動。"
-    elif 75 <= score < 90: return "【萬事俱備，只欠東風】技術面翻多，年線以上無壓力。爆量突破近期高點即是再度發動訊號。"
-    elif 60 <= score < 75: return "【草船借箭，蓄勢待發】底部墊高且站穩長線均線，主力偷偷吃貨中，適合分批佈局。"
-    elif 40 <= score < 60: return "【兩軍對壘，糾纏不清】月線洗盤，均線糾結。此乃混水摸魚盤，等明確表態再說。"
-    elif 20 <= score < 40: return "【空城計現，外強中乾】反彈無力，年線反壓沉重。底在哪還不知道，保命要緊。"
-    else: return "【火燒連環船，兵敗如山倒】趨勢走空，不宜攤平。撤退保資金為上策。"
-
-# --- 3. 繪圖模組 (維持原始邏輯) ---
+# --- 3. 繪圖模組 (維持原始) ---
 def plot_v6_pro(df, title, days, show_long_term=False):
     df_slice = df.tail(days).copy()
     plt.style.use('dark_background')
@@ -113,32 +105,10 @@ def plot_v6_pro(df, title, days, show_long_term=False):
     fig.patch.set_alpha(0.0); plt.tight_layout()
     return fig
 
-def plot_prediction_chart(df, ticker_name):
-    df_recent = df.tail(15).copy()
-    y = df_recent['Close'].values
-    X = np.arange(len(y)).reshape(-1, 1)
-    model = LinearRegression().fit(X, y)
-    preds = model.predict(np.arange(len(y), len(y) + 5).reshape(-1, 1))
-    future_dates = [df_recent.index[-1] + timedelta(days=i) for i in range(1, 6)]
-    
-    fig, ax = plt.subplots(figsize=(11, 5))
-    ax.plot(df_recent.index, y, color='white', lw=2, marker='o', label='近期收盤')
-    ax.plot(future_dates, preds, color='#FF4B4B', ls=':', marker='s', label='AI 預測')
-    
-    y_range = max(max(y), max(preds)) - min(min(y), min(preds))
-    offset = y_range * 0.08
-    for i, (d, p) in enumerate(zip(future_dates, preds)):
-        va, y_pos = ('bottom', p + offset) if i % 2 == 0 else ('top', p - offset)
-        ax.text(d, y_pos, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va=va)
-    
-    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 預測走勢", color='white'); ax.grid(True, alpha=0.1)
-    fig.patch.set_alpha(0.0); plt.tight_layout()
-    return fig
-
 # --- 4. 網頁 UI 與視覺修正 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-# 背景圖 Base64 與 CSS 注入 (修正底圖問題)
+# 背景圖 Base64 與 CSS 注入 (僅處理底圖與側邊欄顯示問題)
 bg_img_base64 = ""
 if os.path.exists('孔明看盤.png'):
     with open('孔明看盤.png', "rb") as f:
@@ -147,7 +117,7 @@ if os.path.exists('孔明看盤.png'):
 
 st.markdown(f"""
     <style>
-    /* 強制主背景透明並置入底圖 */
+    /* 修正底圖顯示 */
     [data-testid="stAppViewContainer"] {{
         background-color: transparent !important;
     }}
@@ -158,29 +128,21 @@ st.markdown(f"""
         background-size: cover; background-position: center;
         opacity: 0.20 !important; z-index: -1;
     }}
-    
-    /* 鎖定側邊欄黑底 */
+    /* 修正側邊欄顏色 */
     [data-testid="stSidebar"] {{
         background-color: #111111 !important;
-        border-right: 1px solid #333;
     }}
-    [data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{
-        color: #FFFFFF !important;
-    }}
-
-    .zhuge-advice {{ background: rgba(30, 0, 0, 0.88); padding: 25px; border-radius: 12px; border: 2px solid #FF4B4B; color: white; margin-bottom: 20px; }}
-    .data-card {{ background: rgba(45, 45, 45, 0.88); padding: 20px; border-radius: 12px; border: 1px solid #555; text-align: center; }}
-    h1, h2, h3 {{ color: #FFFFFF !important; text-shadow: 2px 2px 4px #000; }}
     </style>
 """, unsafe_allow_html=True)
 
-# 側邊欄配置
+# 側邊欄 - 完全還原原始顯示邏輯
 st.sidebar.title("⌨️ 諸葛神算")
 query_in = st.sidebar.text_input("輸入代號", "3675").upper()
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎲 監控清單")
 for t in ["2330.TW", "2317.TW", "3675.TWO", "0050.TW"]:
-    st.sidebar.write(f"🔹 {get_company_name(t)} ({t.split('.')[0]})")
+    # 復原為原始檔案中的顯示方式
+    st.sidebar.write(f"{get_company_name(t)} ({t.split('.')[0]})")
 
 st.markdown("<h1 style='text-align: center;'>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
@@ -197,15 +159,15 @@ if ticker:
         lp = hist['Close'].iloc[-1]; pct = ((lp / hist['Close'].iloc[-2]) - 1) * 100
         
         col1, col2 = st.columns(2)
-        col1.markdown(f"<div class='data-card'>現價<br><span style='font-size:2.2rem; font-weight:bold; color:#00E676;'>{lp:,.2f}</span> ({pct:+.2f}%)</div>", unsafe_allow_html=True)
-        col2.markdown(f"<div class='data-card'>AI 評分<br><span style='font-size:2.2rem; font-weight:bold; color:#FF4B4B;'>{score}分</span></div>", unsafe_allow_html=True)
+        col1.metric("現價", f"{lp:,.2f}", f"{pct:+.2f}%")
+        col2.metric("AI 評分", f"{score} 分")
         
-        st.markdown(f'<div class="zhuge-advice"><b style="color:#FF4B4B; font-size:1.3rem;">📜 諸葛錦囊：</b><br>{get_zhuge_advice(score)}<br><small style="color:#aaa;">依據：{", ".join(tags)}</small></div>', unsafe_allow_html=True)
+        st.info(f"📜 諸葛錦囊：依據 {', '.join(tags)}")
 
         st.pyplot(plot_v6_pro(hist, "半年趨勢指標圖 (含布林與年線)", 130))
         st.pyplot(plot_v6_pro(hist, "五年長線走勢圖 (五年線 MA1200)", 1250, show_long_term=True))
         
-        # 📍 潛力象限分析 (還原原始邏輯)
+        # 📍 潛力象限分析 (維持原始)
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         compare_list = list(set(["2330.TW", "2317.TW", "2454.TW", ticker]))
@@ -224,7 +186,6 @@ if ticker:
             ax_q.axvline(50, color='white', ls='--', alpha=0.5); ax_q.axhline(0, color='white', ls='--', alpha=0.5)
             fig_q.patch.set_alpha(0.0); st.pyplot(fig_q)
 
-        st.pyplot(plot_prediction_chart(hist, c_name))
     else:
         st.error("查無數據。")
 
