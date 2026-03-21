@@ -178,7 +178,7 @@ def get_random_watchlist():
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎲 隨機監控")
 for n, c, s in get_random_watchlist():
-    st.sidebar.markdown(f'<div style="color:white; padding:5px; border-left:3px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{n}({c})<br><span style="color:#ff4b4b">{s}分</span></div>', unsafe_allow_html=True)
+   st.sidebar.markdown(f'<div style="color:white; padding:5px; border-left:3px solid #ff4b4b; background:rgba(255,255,255,0.05); margin-bottom:5px;">{n}({c})<br><span style="color:#ff4b4b">{s}分</span></div>', unsafe_allow_html=True)
 
 st.markdown("<h1>🚀 台股｜AI 諸葛孔明</h1>", unsafe_allow_html=True)
 
