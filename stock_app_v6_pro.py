@@ -109,18 +109,6 @@ def plot_v6_pro(df, title, days, show_long_term=False):
 # --- 4. 網頁 UI ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-# 強制修正側邊欄背景與文字顏色
-st.markdown("""
-    <style>
-    [data-testid="stSidebar"] {
-        background-color: #111111 !important;
-    }
-    [data-testid="stSidebar"] * {
-        color: #FFFFFF !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 st.sidebar.title("⌨️ 諸葛神算")
 query_in = st.sidebar.text_input("輸入代號", "3675").upper()
 st.sidebar.markdown("---")
