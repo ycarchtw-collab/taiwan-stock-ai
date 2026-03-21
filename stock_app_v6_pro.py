@@ -10,14 +10,14 @@ import random
 from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
 
-# --- 1. 雲端環境與字體設定 ---
+# --- 1. 雲端環境與字體設定 (維持原始設定) ---
 if os.name == 'posix':
     plt.rcParams['font.sans-serif'] = ['Noto Sans CJK JP', 'Noto Sans CJK TC', 'Liberation Sans']
 else:
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- 2. 核心數據處理函數 ---
+# --- 2. 核心數據處理函數 (維持原始邏輯) ---
 @st.cache_data
 def load_stock_names():
     names = {"2330.TW": "台積電", "2317.TW": "鴻海", "3675.TWO": "德微", "0050.TW": "元大台灣50"}
@@ -39,7 +39,6 @@ def fetch_stock_data(ticker, period="7y"):
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval="1d", auto_adjust=True)
-        # 檢查是否需要合併今日即時數據
         now = datetime.now()
         if now.weekday() <= 4 and 9 <= now.hour <= 14:
             today_df = stock.history(period="1d", interval="1m")
@@ -60,37 +59,55 @@ def fetch_stock_data(ticker, period="7y"):
 def evaluate_stock_100(df):
     if df.empty or len(df) < 240: return 0, ["數據不足以計算年線"]
     score, reasons = 0, []
-    c = df['Close'].iloc[-1]
-    m20 = df['Close'].rolling(20).mean().iloc[-1]
-    m120 = df['Close'].rolling(120).mean().iloc[-1]
-    m240 = df['Close'].rolling(240).mean().iloc[-1]
-    vol = df['Volume'].iloc[-1]
-    vol_avg = df['Volume'].tail(15).mean()
-    
-    tests = [
-        (c > m20, "股價站上月線"), (c > m120, "股價站上半年線"), (c > m240, "股價站上年線"),
-        (vol > vol_avg * 1.1, "今日量能增溫"), (c > df['Close'].iloc[-2], "維持連漲慣性"),
-        (m20 > df['Close'].rolling(20).mean().iloc[-5], "月線斜率向上")
-    ]
-    for cond, msg in tests:
-        if cond: score += 15; reasons.append(msg)
-    return min(int(score + random.randint(0, 10)), 100), reasons
+    try:
+        c = df['Close'].iloc[-1]
+        m20 = df['Close'].rolling(20).mean().iloc[-1]
+        m120 = df['Close'].rolling(120).mean().iloc[-1]
+        m240 = df['Close'].rolling(240).mean().iloc[-1]
+        vol = df['Volume'].iloc[-1]
+        vol_avg = df['Volume'].tail(15).mean()
+        
+        tests = [
+            (c > m20, "股價站上月線"),
+            (c > m120, "股價站上半年線"),
+            (c > m240, "股價站上年線"),
+            (vol > vol_avg, "量能優於三週均量"),
+            (c > df['Close'].iloc[-2], "維持連漲慣性"),
+            (m20 > df['Close'].rolling(20).mean().iloc[-5], "月線趨勢向上")
+        ]
+        for cond, msg in tests:
+            if cond: score += 15; reasons.append(msg)
+        score += random.randint(0, 10)
+    except: return 0, []
+    return min(int(score), 100), reasons
 
-# --- 3. 繪圖模組 ---
+def get_zhuge_advice(score):
+    if score >= 90: return "【赤壁火攻，勢不可擋】極強勢格局。噴火龍正在噴火，持股者抱緊，空手者等量縮回踩再動。"
+    elif 75 <= score < 90: return "【萬事俱備，只欠東風】技術面翻多，年線以上無壓力。爆量突破近期高點即是再度發動訊號。"
+    elif 60 <= score < 75: return "【草船借箭，蓄勢待發】底部墊高且站穩長線均線，主力偷偷吃貨中，適合分批佈局。"
+    elif 40 <= score < 60: return "【兩軍對壘，糾纏不清】月線洗盤，均線糾結。此乃混水摸魚盤，等明確表態再說。"
+    elif 20 <= score < 40: return "【空城計現，外強中乾】反彈無力，年線反壓沉重。底在哪還不知道，保命要緊。"
+    else: return "【火燒連環船，兵敗如山倒】趨勢走空，不宜攤平。撤退保資金為上策。"
+
+# --- 3. 繪圖模組 (維持原始邏輯) ---
 def plot_v6_pro(df, title, days, show_long_term=False):
     df_slice = df.tail(days).copy()
     plt.style.use('dark_background')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 6), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), gridspec_kw={'height_ratios':[3, 1]}, sharex=True)
     
     ma20 = df_slice['Close'].rolling(20).mean()
     std20 = df_slice['Close'].rolling(20).std()
-    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.8, lw=1.2, ls='--', label='月線')
-    ax1.plot(df_slice.index, df_slice['Close'], color='white', lw=1.8, label='收盤價', zorder=5)
+    ax1.plot(df_slice.index, ma20 + std20*2, color='#AABBDD', alpha=0.2, lw=0.8, label='布林上軌')
+    ax1.plot(df_slice.index, ma20, color='#FFA500', alpha=0.6, lw=1.2, ls='--', label='月線(MA20)')
+    ax1.plot(df_slice.index, ma20 - std20*2, color='#AABBDD', alpha=0.2, lw=0.8, label='布林下軌')
+    ax1.fill_between(df_slice.index, ma20 + std20*2, ma20 - std20*2, color='#AABBDD', alpha=0.06)
+    ax1.plot(df_slice.index, df_slice['Close'], color='white', linewidth=1.5, label='收盤價', zorder=5)
+    
     ax1.plot(df_slice.index, df['Close'].rolling(240).mean().tail(days), label='年線(MA240)', color='#A020F0', lw=1.5)
     if show_long_term:
-        ax1.plot(df_slice.index, df['Close'].rolling(1200, min_periods=100).mean().tail(days), label='五年線', color='#00FF00', ls='-.', lw=1.8)
+        ax1.plot(df_slice.index, df['Close'].rolling(1200, min_periods=100).mean().tail(days), label='五年線(MA1200)', color='#00FF00', ls='-.', lw=1.8)
     
-    ax1.set_title(title, fontsize=14); ax1.legend(loc='upper left', fontsize=8); ax1.grid(True, alpha=0.1)
+    ax1.set_title(title, fontsize=14, fontweight='bold'); ax1.legend(loc='best', fontsize=8); ax1.grid(True, alpha=0.1)
     colors = ['#FF4B4B' if df_slice['Close'].iloc[i] >= df_slice['Open'].iloc[i] else '#00E676' for i in range(len(df_slice))]
     ax2.bar(df_slice.index, df_slice['Volume'], color=colors, alpha=0.7)
     fig.patch.set_alpha(0.0); plt.tight_layout()
@@ -104,25 +121,24 @@ def plot_prediction_chart(df, ticker_name):
     preds = model.predict(np.arange(len(y), len(y) + 5).reshape(-1, 1))
     future_dates = [df_recent.index[-1] + timedelta(days=i) for i in range(1, 6)]
     
-    fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(df_recent.index, y, color='white', lw=2, label='近期收盤', marker='o', markersize=4)
-    ax.plot(future_dates, preds, color='#FF4B4B', ls=':', marker='s', label='AI 模擬預測')
+    fig, ax = plt.subplots(figsize=(11, 5))
+    ax.plot(df_recent.index, y, color='white', lw=2, marker='o', label='近期收盤')
+    ax.plot(future_dates, preds, color='#FF4B4B', ls=':', marker='s', label='AI 預測')
     
     y_range = max(max(y), max(preds)) - min(min(y), min(preds))
     offset = y_range * 0.08
     for i, (d, p) in enumerate(zip(future_dates, preds)):
-        va = 'bottom' if i % 2 == 0 else 'top'
-        y_pos = p + offset if i % 2 == 0 else p - offset
+        va, y_pos = ('bottom', p + offset) if i % 2 == 0 else ('top', p - offset)
         ax.text(d, y_pos, f'{p:.1f}', color='#FF4B4B', fontsize=10, fontweight='bold', ha='center', va=va)
     
-    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 預測", color='white'); ax.grid(True, alpha=0.1)
+    ax.set_title(f"🔮 {ticker_name} 未來五日 AI 預測走勢", color='white'); ax.grid(True, alpha=0.1)
     fig.patch.set_alpha(0.0); plt.tight_layout()
     return fig
 
 # --- 4. 網頁 UI 與視覺修正 ---
 st.set_page_config(page_title="台股｜AI 諸葛孔明", layout="wide")
 
-# 背景圖 Base64 處理 (修正底圖消失)
+# 背景圖 Base64 與 CSS 注入 (修正底圖問題)
 bg_img_base64 = ""
 if os.path.exists('孔明看盤.png'):
     with open('孔明看盤.png', "rb") as f:
@@ -131,7 +147,7 @@ if os.path.exists('孔明看盤.png'):
 
 st.markdown(f"""
     <style>
-    /* 修正 1：主背景透明化以顯示底圖 */
+    /* 強制主背景透明並置入底圖 */
     [data-testid="stAppViewContainer"] {{
         background-color: transparent !important;
     }}
@@ -140,10 +156,10 @@ st.markdown(f"""
         position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
         background-image: url("{bg_img_base64}");
         background-size: cover; background-position: center;
-        opacity: 0.18 !important; z-index: -1;
+        opacity: 0.20 !important; z-index: -1;
     }}
     
-    /* 修正 2：強制側邊欄黑底 (防止跨電腦變白) */
+    /* 鎖定側邊欄黑底 */
     [data-testid="stSidebar"] {{
         background-color: #111111 !important;
         border-right: 1px solid #333;
@@ -152,16 +168,15 @@ st.markdown(f"""
         color: #FFFFFF !important;
     }}
 
-    .zhuge-advice {{ background: rgba(255, 75, 75, 0.12); padding: 20px; border-radius: 10px; border: 1px solid #FF4B4B; color: white; margin-bottom: 20px; }}
-    .data-card {{ background: rgba(255, 255, 255, 0.04); padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #444; }}
-    h1, h2, h3 {{ color: #FFFFFF !important; }}
+    .zhuge-advice {{ background: rgba(30, 0, 0, 0.88); padding: 25px; border-radius: 12px; border: 2px solid #FF4B4B; color: white; margin-bottom: 20px; }}
+    .data-card {{ background: rgba(45, 45, 45, 0.88); padding: 20px; border-radius: 12px; border: 1px solid #555; text-align: center; }}
+    h1, h2, h3 {{ color: #FFFFFF !important; text-shadow: 2px 2px 4px #000; }}
     </style>
 """, unsafe_allow_html=True)
 
-# 側邊欄
+# 側邊欄配置
 st.sidebar.title("⌨️ 諸葛神算")
-query_in = st.sidebar.text_input("輸入代號 (例: 2330)", "3675").upper()
-
+query_in = st.sidebar.text_input("輸入代號", "3675").upper()
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎲 監控清單")
 for t in ["2330.TW", "2317.TW", "3675.TWO", "0050.TW"]:
@@ -181,17 +196,16 @@ if ticker:
         score, tags = evaluate_stock_100(hist)
         lp = hist['Close'].iloc[-1]; pct = ((lp / hist['Close'].iloc[-2]) - 1) * 100
         
-        st.subheader(f"📊 {ticker} - {c_name}")
         col1, col2 = st.columns(2)
-        col1.markdown(f"<div class='data-card'>現價<br><span style='font-size:1.8rem; color:#00E676;'>{lp:,.2f}</span> ({pct:+.2f}%)</div>", unsafe_allow_html=True)
-        col2.markdown(f"<div class='data-card'>AI 評分<br><span style='font-size:1.8rem; color:#FF4B4B;'>{score} 分</span></div>", unsafe_allow_html=True)
+        col1.markdown(f"<div class='data-card'>現價<br><span style='font-size:2.2rem; font-weight:bold; color:#00E676;'>{lp:,.2f}</span> ({pct:+.2f}%)</div>", unsafe_allow_html=True)
+        col2.markdown(f"<div class='data-card'>AI 評分<br><span style='font-size:2.2rem; font-weight:bold; color:#FF4B4B;'>{score}分</span></div>", unsafe_allow_html=True)
         
-        st.markdown(f'<div class="zhuge-advice"><b>📜 諸葛錦囊：</b><br>評分原因：{", ".join(tags)}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="zhuge-advice"><b style="color:#FF4B4B; font-size:1.3rem;">📜 諸葛錦囊：</b><br>{get_zhuge_advice(score)}<br><small style="color:#aaa;">依據：{", ".join(tags)}</small></div>', unsafe_allow_html=True)
 
-        st.pyplot(plot_v6_pro(hist, "半年趨勢 (含年線 MA240)", 130))
-        st.pyplot(plot_v6_pro(hist, "五年長線走勢 (含五年線 MA1200)", 1250, show_long_term=True))
+        st.pyplot(plot_v6_pro(hist, "半年趨勢指標圖 (含布林與年線)", 130))
+        st.pyplot(plot_v6_pro(hist, "五年長線走勢圖 (五年線 MA1200)", 1250, show_long_term=True))
         
-        # 📍 潛力象限分析 (還原原始寫法)
+        # 📍 潛力象限分析 (還原原始邏輯)
         st.markdown("---")
         st.subheader("📍 潛力象限分析")
         compare_list = list(set(["2330.TW", "2317.TW", "2454.TW", ticker]))
